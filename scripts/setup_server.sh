@@ -5,6 +5,7 @@
 # NOT done by this script (manual, because they are secrets):
 #   - .env                (copy from your Mac)
 #   - auth/wolt.json      (copy from your Mac, or re-seed the Wolt token)
+#   - DB user passwords   (wolt_writer, ai_reader: see "Database users" in docs/server.md)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."   # run from the project root

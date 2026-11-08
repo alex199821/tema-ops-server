@@ -69,6 +69,44 @@ No alert email = everything worked. If the whole server is down, nothing runs an
 | `ALERT_TO` | who gets "something broke" emails |
 | `WOLT_REPORT_TO` | who gets the Wolt report (several emails: comma-separated) |
 
+## Database users
+
+Created by `db/migrations/003_roles.sql`. Passwords are **not** in git; they are set by hand.
+
+| User | Can do | Used by | `.env` variable |
+|---|---|---|---|
+| `ops` | everything (owner) | migrations only (`docker compose exec ... psql -U ops`) | none |
+| `wolt_writer` | read/write rows in `wolt.*`, read `branches` | all current scripts (daily update, report) | `DATABASE_URL` |
+| `ai_reader` | read only, queries stopped after 10 s | the AI sandbox | `AI_DATABASE_URL` |
+
+Tables added later get the same rights automatically, so `ai_reader` can read every new table too. For sensitive tables (salaries etc.), revoke it: `REVOKE SELECT ON <table> FROM ai_reader;`
+
+**On a new server (or new Mac DB), in this order:**
+
+1. Run the migrations (`./scripts/setup_server.sh` does it). This creates the users without passwords.
+2. Make two passwords: `openssl rand -hex 16; openssl rand -hex 16` (hex, so they are safe inside a URL).
+3. Set them in the DB:
+
+   ```bash
+   sudo docker compose exec db psql -U ops -d ops
+   ```
+
+   then type `\password wolt_writer` (paste the 1st password twice), `\password ai_reader` (paste the 2nd twice), and `\q`. Nothing shows while you paste; that's normal.
+4. Only now put them into `.env`:
+
+   ```
+   DATABASE_URL=postgresql://wolt_writer:<1st password>@localhost:5432/ops
+   AI_DATABASE_URL=postgresql://ai_reader:<2nd password>@localhost:5432/ops
+   ```
+
+If a script says `password authentication failed for user "wolt_writer"`, step 3 was skipped or the password in the DB doesn't match `.env`. Redo step 3 with the password from `.env` (`grep DATABASE_URL .env`).
+
+Check that `ai_reader` really is read-only (prints the order count, then must fail with `read-only transaction`):
+
+```bash
+uv run python -c "import os, psycopg, dotenv; dotenv.load_dotenv(); c = psycopg.connect(os.environ['AI_DATABASE_URL']); print(c.execute('SELECT count(*) FROM wolt.orders').fetchone()); c.execute('DELETE FROM wolt.orders')"
+```
+
 ## Check the jobs
 
 Run on the server.
