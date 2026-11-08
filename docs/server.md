@@ -9,7 +9,7 @@
 | VM name | `tema-ops-server` |
 | Zone | `europe-west3-a` (Frankfurt) |
 | Machine | `e2-small` (2 vCPU, 2 GB RAM), Ubuntu 24.04, 30 GB disk |
-| External IP | (see `gcloud compute instances list --project=tema-ops-prod`; not static yet, may change if the VM is stopped) |
+| External IP | static, reserved as `tema-ops-ip` (region `europe-west3`). See it with `gcloud compute addresses list --project=tema-ops-prod`. Kept out of git while the repo is public. |
 | Timezone | `Asia/Tbilisi` |
 
 ## Connect
@@ -141,6 +141,24 @@ gcloud compute instances start tema-ops-server --zone=europe-west3-a --project=t
 ```
 
 While stopped, the daily Wolt update does not run. If it stays stopped for long, the Wolt token chain can die.
+
+## Moving to a new server (e.g. Hetzner)
+
+Everything below is tied to *this* machine and has to be redone on the new one.
+
+1. **New machine**: Ubuntu, timezone `Asia/Tbilisi`, clone the repo, run `./scripts/setup_server.sh`.
+2. **GitHub read-only deploy key** (lets the server `git pull`): make a new one on the new server and add it in GitHub → repo Settings → Deploy keys. Delete the old one.
+3. **Secrets, copied by hand**: `.env`, then the DB user passwords (see "Database users").
+4. **Data**: `pg_dump --data-only` on the old server, restore on the new one.
+5. **Wolt token**: move `auth/wolt.json` and **stop the old server's cron first**. Only one machine may ever renew the token, otherwise the chain dies.
+6. **Cron**: copy the lines from `crontab -l`.
+7. **Auto-deploy key** (lets GitHub Actions run `deploy.sh`): add the same `command="…/scripts/deploy.sh",restrict ssh-ed25519 …` line to `~/.ssh/authorized_keys` on the new server.
+8. **GitHub Actions secrets**: update the server IP and its host key (known_hosts) to the new server's.
+9. **Google Cloud cleanup**, so it stops costing money:
+   ```bash
+   gcloud compute instances delete tema-ops-server --zone=europe-west3-a --project=tema-ops-prod
+   gcloud compute addresses delete tema-ops-ip --region=europe-west3 --project=tema-ops-prod
+   ```
 
 ## Lost access?
 

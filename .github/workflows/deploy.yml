@@ -1,0 +1,27 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]     # every push to main deploys
+  workflow_dispatch:     # adds a "Run workflow" button on GitHub, for a manual deploy
+
+concurrency: deploy      # never run two deploys at the same time
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest   # GitHub lends us a fresh Linux machine for a minute
+    steps:
+      - name: Set up SSH key
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          echo "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: ssh -i ~/.ssh/deploy_key macbook@$HOST
