@@ -45,7 +45,31 @@ Run on the Mac (not on the server). It builds the report on the server and copie
 gcloud compute ssh tema-ops-server --zone=europe-west3-a --project=tema-ops-prod --command="cd ~/tema-ops-server && ~/.local/bin/uv run python src/tema_ops/wolt/excel_report.py" && gcloud compute scp tema-ops-server:~/tema-ops-server/reports/wolt_report.xlsx ~/Desktop/ --zone=europe-west3-a --project=tema-ops-prod
 ```
 
-## Check the daily update (cron)
+## Scheduled jobs (cron)
+
+| When | What | Script | Log |
+|---|---|---|---|
+| Every day 12:00 | Fetch yesterday's Wolt orders for all branches → DB | `wolt/daily_update.py` | `logs/daily_update.log` |
+| Every 4 h (+ random 0–60 min) | Renew the Wolt token so the chain stays alive | `wolt/wolt_login.py` | `logs/token.log` |
+| 1st and 16th, 13:00 | Build the Excel report and email it to `WOLT_REPORT_TO` | `wolt/send_report.py` | `logs/send_report.log` |
+
+Every job runs through `src/tema_ops/run_job.py` (the supervisor). It:
+
+- puts a timestamp on every log line, plus `START`, `DONE` or `FAILED (exit N)` lines,
+- emails `ALERT_TO` with the last 60 output lines if the job fails (non-zero exit code).
+
+No alert email = everything worked. If the whole server is down, nothing runs and no email is sent.
+
+## Email settings (server `.env`, not in git)
+
+| Variable | What |
+|---|---|
+| `SMTP_USER` | bot Gmail that sends everything (`tema.opsai@gmail.com`) |
+| `SMTP_PASSWORD` | that Gmail's app password |
+| `ALERT_TO` | who gets "something broke" emails |
+| `WOLT_REPORT_TO` | who gets the Wolt report (several emails: comma-separated) |
+
+## Check the jobs
 
 Run on the server.
 
@@ -53,11 +77,17 @@ Run on the server.
 crontab -l                                                  # what is scheduled
 tail -20 ~/tema-ops-server/logs/daily_update.log            # last daily update output
 tail -5 ~/tema-ops-server/logs/token.log                    # last Wolt token renewals
-journalctl -u cron --since today | grep daily_update        # proof cron started it (and when)
-ls -l --time-style=+%H:%M ~/tema-ops-server/data/wolt/*/$(date -d yesterday +%F).json   # when yesterday's files were written
+tail -5 ~/tema-ops-server/logs/send_report.log              # last report emails
+journalctl -u cron --since today | grep run_job             # proof cron started the jobs (and when)
 ```
 
-A good daily run ends with 3 `loaded <venue_id> <date>` lines, one per branch.
+A good daily run ends with 3 `loaded <venue_id> <date>` lines (one per branch), then `DONE`.
+
+Test the alert email (fails on purpose, no Wolt involved):
+
+```bash
+cd ~/tema-ops-server && uv run python src/tema_ops/run_job.py python -c "1/0"
+```
 
 Redo one day by hand (on the server):
 
