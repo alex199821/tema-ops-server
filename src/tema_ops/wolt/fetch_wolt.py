@@ -168,7 +168,7 @@ def main():
                 print(f"Skipping {day_str} (already saved)")
                 current_dt += datetime.timedelta(days=1)
                 continue
-            print(f"Fetching {day_str}...")
+            print(f"Fetching {args.venue} {day_str}...")
             
             # 1. Fetch API 1 paginated list
             api1_orders_map = {}
