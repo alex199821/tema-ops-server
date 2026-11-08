@@ -37,6 +37,34 @@ You don't copy the key. On the new computer:
 2. `gcloud auth login` (sign in with the Google account that owns the project)
 3. Run the same `gcloud compute ssh ...` command. It creates a new key for that computer.
 
+## Get the Wolt Excel report on your Desktop
+
+Run on the Mac (not on the server). It builds the report on the server and copies it to `~/Desktop/wolt_report.xlsx`:
+
+```bash
+gcloud compute ssh tema-ops-server --zone=europe-west3-a --project=tema-ops-prod --command="cd ~/tema-ops-server && ~/.local/bin/uv run python src/tema_ops/wolt/excel_report.py" && gcloud compute scp tema-ops-server:~/tema-ops-server/reports/wolt_report.xlsx ~/Desktop/ --zone=europe-west3-a --project=tema-ops-prod
+```
+
+## Check the daily update (cron)
+
+Run on the server.
+
+```bash
+crontab -l                                                  # what is scheduled
+tail -20 ~/tema-ops-server/logs/daily_update.log            # last daily update output
+tail -5 ~/tema-ops-server/logs/token.log                    # last Wolt token renewals
+journalctl -u cron --since today | grep daily_update        # proof cron started it (and when)
+ls -l --time-style=+%H:%M ~/tema-ops-server/data/wolt/*/$(date -d yesterday +%F).json   # when yesterday's files were written
+```
+
+A good daily run ends with 3 `loaded <venue_id> <date>` lines, one per branch.
+
+Redo one day by hand (on the server):
+
+```bash
+cd ~/tema-ops-server && uv run python src/tema_ops/wolt/daily_update.py 2026-11-07
+```
+
 ## Start / stop (to save credits)
 
 ```bash
