@@ -13,10 +13,7 @@ main() {
   ~/.local/bin/uv sync
 
   echo "== Apply migrations"
-  for f in db/migrations/*.sql; do
-    echo "   $f"
-    docker compose exec -T db psql -U ops -d ops -v ON_ERROR_STOP=1 < "$f"
-  done
+  scripts/migrate.sh
 
   echo "== Deployed: $(git log -1 --format='%h %s')"
 }

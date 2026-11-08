@@ -30,9 +30,6 @@ uv sync
 echo "== Database"
 sudo docker compose up -d db
 until sudo docker compose exec -T db pg_isready -U ops -d ops >/dev/null 2>&1; do sleep 2; done
-for f in db/migrations/*.sql; do
-  echo "   applying $f"
-  sudo docker compose exec -T db psql -U ops -d ops -v ON_ERROR_STOP=1 < "$f"
-done
+scripts/migrate.sh
 
 echo "== Done. Log out and back in once so 'docker' works without sudo."
