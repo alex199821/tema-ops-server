@@ -12,6 +12,7 @@ This is a real system used by a real business, not a demo.
 | When | What |
 |---|---|
 | Every day, 12:00 | Pulls yesterday's Wolt delivery orders for all 3 branches into PostgreSQL |
+| Every day, 12:30 | Backs up the whole database to Google Cloud Storage (kept 30 days; the server can add backups but not delete them) |
 | 1st and 16th of the month, 13:00 | Builds the Wolt sales report (Excel, one sheet per branch, units per product per day) and emails it to the manager |
 | Every ~4 hours | Renews the Wolt login token so the daily pull keeps working |
 | Any job fails | Emails an alert with the last 60 lines of that job's output |
@@ -47,7 +48,7 @@ Vertex AI and nothing else.
 
 **Next:** an eval set of real owner questions with known answers, then a comparison of models
 and settings on accuracy and cost (target: about 0.1 cent per question). After that comes a
-FastAPI service and a WhatsApp bot.
+FastAPI service and a WhatsApp bot. The full list of open work is in [TODO.md](TODO.md).
 
 ## How it fits together
 

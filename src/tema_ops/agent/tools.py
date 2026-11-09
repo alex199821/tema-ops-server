@@ -1,8 +1,12 @@
 import os
+from datetime import date
+from pathlib import Path
 
 import psycopg
 from dotenv import load_dotenv
 from langchain.tools import tool
+
+from tema_ops.wolt.excel_report import build_report
 
 load_dotenv()
 
@@ -34,8 +38,15 @@ def run_sql(query: str) -> str:
         lines.append(f"({len(rows)} rows)")
     return "\n".join(lines)
 
+# The AI calls this when someone asks for the Wolt report file.
+# Gemini only gets the text; the file path (the "artifact") goes to our chat code, which delivers the file.
+@tool(response_format="content_and_artifact")
+def get_wolt_report() -> tuple[str, str]:
+    """Build the Wolt sales report as an Excel file and attach it to the chat.
+    The report has one sheet per branch, with units sold per product per day and daily totals.
+    Use this only when the user asks for the report or the Excel file itself.
+    For questions about sales, orders or products, use run_sql instead."""
+    path = Path(f"reports/wolt_report_chat_{date.today():%Y-%m-%d}.xlsx").resolve()
+    build_report(path)
+    return "ვოლტის რეპორტი მიმაგრებულია მესიჯზე", str(path)
 
-if __name__ == "__main__":
-    print(run_sql.invoke("SELECT id, name FROM branches ORDER BY id"))
-    print(run_sql.invoke("DELETE FROM wolt.orders"))
-    print(run_sql.invoke("SET statement_timeout = 0; SELECT 1"))

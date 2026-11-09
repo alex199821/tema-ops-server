@@ -5,6 +5,7 @@ from langchain.agents.middleware import ModelFallbackMiddleware, wrap_model_call
 from langgraph.checkpoint.memory import InMemorySaver
 
 from tema_ops.agent.model import get_model
+from tema_ops.agent.tools import get_wolt_report, run_sql
 from tema_ops.agent.tools import run_sql
 
 SRC = Path(__file__).parent.parent  # src/tema_ops/
@@ -39,7 +40,7 @@ def load_glossaries():
 def build_agent():
     return create_agent(
         get_model(),
-        tools=[run_sql],
+        tools=[run_sql, get_wolt_report],
         system_prompt=INSTRUCTIONS + "\n\n" + load_glossaries(),
         middleware=[keep_last_questions, ModelFallbackMiddleware(get_model(priority=True))],
         checkpointer=InMemorySaver(),  # remembers the conversation until the program stops
@@ -63,5 +64,8 @@ if __name__ == "__main__":
         seen = len(result["messages"])
         for message in new_messages:
             for call in getattr(message, "tool_calls", []):
-                print("SQL:", call["args"]["query"])
+                if call["name"] == "run_sql":
+                    print("SQL:", call["args"]["query"])
+            if getattr(message, "artifact", None):
+                print("File:", message.artifact)
         print(result["messages"][-1].text)

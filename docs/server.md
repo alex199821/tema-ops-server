@@ -52,6 +52,7 @@ gcloud compute ssh tema-ops-server --zone=europe-west3-a --project=tema-ops-prod
 |---|---|---|---|
 | Every day 12:00 | Fetch yesterday's Wolt orders for all branches → DB | `wolt/daily_update.py` | `logs/daily_update.log` |
 | Every 4 h (+ random 0–60 min) | Renew the Wolt token so the chain stays alive | `wolt/wolt_login.py` | `logs/token.log` |
+| Every day 12:30 | Back up the whole database to Cloud Storage (see "Backups") | `scripts/backup_db.sh` | `logs/backup_db.log` |
 | 1st and 16th, 13:00 | Build the Excel report and email it to `WOLT_REPORT_TO` | `wolt/send_report.py` | `logs/send_report.log` |
 
 Every job runs through `src/tema_ops/run_job.py` (the supervisor). It:
@@ -107,6 +108,63 @@ Check that `ai_reader` really is read-only (prints the order count, then must fa
 ```bash
 uv run python -c "import os, psycopg, dotenv; dotenv.load_dotenv(); c = psycopg.connect(os.environ['AI_DATABASE_URL']); print(c.execute('SELECT count(*) FROM wolt.orders').fetchone()); c.execute('DELETE FROM wolt.orders')"
 ```
+
+## Backups
+
+Every day at 12:30, right after the Wolt load, `scripts/backup_db.sh` saves a full copy of the
+database (`pg_dump`, compressed, about 1 MB) to the Google Cloud Storage bucket
+`gs://tema-ops-prod-db-backups` (Frankfurt). Each file is a complete copy, e.g.
+`ops_2026-11-10_1230.dump`, not just that day's changes.
+
+- **Kept 30 days.** The bucket deletes older files by itself (lifecycle rule). A deleted file
+  can still be recovered for 7 more days (Google's "soft delete").
+- **The server can add and read backups, but not delete or overwrite them** (roles
+  `storage.objectCreator` + `storage.objectViewer` for `tema-ops-vm`). Someone who broke into
+  the server couldn't destroy the backups.
+- **A failed backup sends an alert email**, because it runs through `run_job.py` like every job.
+- Code, `.env`, `auth/wolt.json` and the crontab are **not** in the backup. Code is in git; the
+  rest is listed in "Moving to a new server".
+
+**See the backups** (on the server or the Mac):
+
+```bash
+gcloud storage ls -l gs://tema-ops-prod-db-backups/
+```
+
+**Run a backup by hand** (on the server):
+
+```bash
+cd ~/tema-ops-server && uv run python src/tema_ops/run_job.py scripts/backup_db.sh
+```
+
+**Restore** (on the server, e.g. after a broken disk or bad data). This **replaces** the
+database's contents with the backup, so stop and think first:
+
+1. Pick a file from the list above and download it:
+
+   ```bash
+   gcloud storage cp gs://tema-ops-prod-db-backups/<file>.dump /tmp/
+   ```
+
+2. Load it. `--clean --if-exists` drops each table first, then recreates it from the backup:
+
+   ```bash
+   cd ~/tema-ops-server && sudo docker compose exec -T db pg_restore -U ops -d ops --clean --if-exists < /tmp/<file>.dump
+   ```
+
+3. Check, then delete the downloaded file:
+
+   ```bash
+   sudo docker compose exec -T db psql -U ops -d ops -c "SELECT count(*), max(received_at) FROM wolt.orders"
+   rm /tmp/<file>.dump
+   ```
+
+The DB users (`wolt_writer`, `ai_reader`) must already exist; on a new server, run the
+migrations first (see "Database users"). The backup brings back their table rights, not their
+passwords.
+
+Tested 2026-11-10 on the Mac, into a separate test database: all 7,893 orders came back, both
+into an empty database and over an existing one (`--clean`), with the users' rights intact.
 
 ## The AI on the server
 
@@ -274,7 +332,7 @@ Everything below is tied to *this* machine and has to be redone on the new one.
 1. **New machine**: Ubuntu, timezone `Asia/Tbilisi`, clone the repo, run `./scripts/setup_server.sh`.
 2. **GitHub read-only deploy key** (lets the server `git pull`): make a new one on the new server and add it in GitHub → repo Settings → Deploy keys. Delete the old one.
 3. **Secrets, copied by hand**: `.env`, then the DB user passwords (see "Database users").
-4. **Data**: `pg_dump --data-only` on the old server, restore on the new one.
+4. **Data**: run a backup by hand on the old server, then restore it on the new one (see "Backups"). The new server reads the bucket with the `tema-ops-vm` key from step 9. Stop the old server's cron first, so no new orders arrive after the backup.
 5. **Wolt token**: move `auth/wolt.json` and **stop the old server's cron first**. Only one machine may ever renew the token, otherwise the chain dies.
 6. **Cron**: copy the lines from `crontab -l`.
 7. **Auto-deploy key** (lets GitHub Actions run `deploy.sh`): add the same `command="…/scripts/deploy.sh",restrict ssh-ed25519 …` line to `~/.ssh/authorized_keys` on the new server.
