@@ -10,7 +10,8 @@ from decimal import Decimal
 from pathlib import Path
 
 import httpx
-from wolt_login import refresh
+
+from tema_ops.wolt.wolt_login import refresh
 
 # ----- CONFIG & GLOBALS -----
 BASE_URL = "https://merchant-gateway.wolt.com/merchant-analytics-api/v2"

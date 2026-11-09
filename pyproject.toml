@@ -1,7 +1,7 @@
 [project]
 name = "tema-ops"
 version = "0.1.0"
-description = "Add your description here"
+description = "Operations backend for Tema, a fast-food chain in Tbilisi: Wolt order data, reports, alerts, and an AI that answers questions with read-only SQL"
 readme = "README.md"
 authors = [
     { name = "auplisas", email = "aupli16@freeuni.edu.ge" }
@@ -9,14 +9,12 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.28.1",
+    "langchain>=1.4.9",
+    "langchain-google-genai>=4.4.3",
     "openpyxl>=3.1.5",
-    "playwright>=1.64.1",
     "psycopg[binary]>=3.3.8",
     "python-dotenv>=1.2.4",
 ]
-
-[project.scripts]
-tema-ops = "tema_ops:main"
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]

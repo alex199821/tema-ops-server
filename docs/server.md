@@ -133,6 +133,63 @@ Redo one day by hand (on the server):
 cd ~/tema-ops-server && uv run python src/tema_ops/wolt/daily_update.py 2026-11-07
 ```
 
+## Auto-deploy (GitHub Actions)
+
+Every push to `main` updates the server on its own. Nobody has to `git pull` on the server.
+
+**To deploy**, on the Mac, after committing on `develop`:
+
+```bash
+git checkout main && git merge develop && git push && git checkout develop
+```
+
+**What happens after the push:**
+
+1. GitHub sees the push to `main` and runs `.github/workflows/deploy.yml` on one of its own machines.
+2. That machine connects to the server over SSH using the deploy key (see below).
+3. The server runs `scripts/deploy.sh`, which does three things:
+   - `git pull --ff-only`: downloads the new code
+   - `uv sync`: installs new or changed libraries
+   - `scripts/migrate.sh`: runs any new file in `db/migrations/`. Each file runs only once; the database records which ones ran (table `schema_migrations`).
+
+Nothing needs restarting. Cron starts the scripts from scratch each time, so the next run uses the new code.
+
+**Not deployed automatically.** Do these by hand on the server:
+
+- changes to `.env`
+- changes to the crontab (`crontab -e`)
+- DB user passwords
+
+**Check a deploy** (on the Mac), or open GitHub → repo → **Actions** tab:
+
+```bash
+gh run list --workflow=deploy.yml --limit 5     # ✓ = worked, X = failed
+gh run view <run id> --log-failed               # why it failed (run id comes from the list)
+```
+
+GitHub emails you by default when a run fails.
+
+**Deploy again without a new push** (e.g. after fixing something on the server):
+
+```bash
+gh workflow run deploy.yml
+```
+
+or Actions tab → **Deploy** → **Run workflow**. You can also run `./scripts/deploy.sh` by hand on the server.
+
+**If it fails at `git pull`**, someone changed code files directly on the server. Run `git status` on the server and undo those changes. Code changes should only arrive through `main`.
+
+**The deploy key:**
+
+| Part | Where |
+|---|---|
+| Private half | only in the GitHub secret `DEPLOY_SSH_KEY` |
+| Public half | on the server in `~/.ssh/authorized_keys`, on a line starting with `command="/home/macbook/tema-ops-server/scripts/deploy.sh",restrict` |
+
+That `command=…,restrict` prefix means this key can only run `deploy.sh`. A stolen copy of the key can't open a shell or run any other command.
+
+The other two GitHub secrets are `DEPLOY_HOST` (the server's IP) and `DEPLOY_KNOWN_HOSTS` (the server's fingerprint, so GitHub only ever connects to the real server). All three are in GitHub → repo **Settings → Secrets and variables → Actions**. When the server moves, update them (steps 7–8 in "Moving to a new server" below).
+
 ## Start / stop (to save credits)
 
 ```bash
