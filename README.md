@@ -17,28 +17,37 @@ This is a real system used by a real business, not a demo.
 | Any job fails | Emails an alert with the last 60 lines of that job's output |
 | Push to `main` | Deploys the new code to the server (GitHub Actions) |
 
-## In progress: ask the data a question
+## Ask the data a question
 
 The owner asks something like *"Which products get bad ratings most often?"* The AI writes
 the SQL, runs it on the database and answers with the numbers, saying which period and
-branches the answer covers.
+branches the answer covers. It works today in the terminal, on the server and on a laptop.
 
 - **Model:** Gemini 3.8 Flash on Vertex AI, through LangChain. The model is a setting
   (`AI_MODEL`), so different models can be compared.
-- **Tracing:** every question, SQL query and answer is recorded in LangSmith.
 - **Business rules:** glossaries (`glossary.md`) tell the AI what the data means, for example:
   revenue counts delivered orders only; a rating average must say how many orders were rated;
   if a product name matches more than one product, ask instead of guessing.
+- **Follow-up questions:** it remembers the last 5 questions of a conversation, so
+  *"How many pitas did Lisi sell yesterday?"* followed by *"And Dolabauri?"* works.
+- **When Vertex AI is busy** (error 429), the call is retried on Priority PayGo, which costs 1.8×
+  but only for the calls that need it.
+- **Tracing:** every question, SQL query and answer is recorded in LangSmith.
+- **Cost, measured:** about 0.9 cent per question.
 
-Safety comes from the database user, not from the prompt. The AI connects as `ai_reader`:
+Safety comes from the database, not from the prompt. The AI connects as `ai_reader`:
 
-- can only read (every transaction is read-only)
+- can only read (every transaction is read-only, and it has no write rights)
 - any query is stopped after 10 seconds
-- at most 100 rows are returned to the model
+- only one SQL statement per query, so it can't switch its own time limit off
+- at most 200 rows are returned to the model
 
-**Next:** a SQL checker, an eval set of real owner questions with known answers, and a
-comparison of models on accuracy and cost (target: about 0.1 cent per question). After that
-comes a FastAPI service and a WhatsApp bot.
+On the server, the AI logs in to Google as its own account (`tema-ops-vm`), which can call
+Vertex AI and nothing else.
+
+**Next:** an eval set of real owner questions with known answers, then a comparison of models
+and settings on accuracy and cost (target: about 0.1 cent per question). After that comes a
+FastAPI service and a WhatsApp bot.
 
 ## How it fits together
 

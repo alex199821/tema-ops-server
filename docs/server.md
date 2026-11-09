@@ -11,6 +11,7 @@
 | Machine | `e2-small` (2 vCPU, 2 GB RAM), Ubuntu 24.04, 30 GB disk |
 | External IP | static, reserved as `tema-ops-ip` (region `europe-west3`). See it with `gcloud compute addresses list --project=tema-ops-prod`. Kept out of git while the repo is public. |
 | Timezone | `Asia/Tbilisi` |
+| Google account the VM runs as | `tema-ops-vm` (service account). It may only use Vertex AI (Gemini). See "The AI on the server". |
 
 ## Connect
 
@@ -107,6 +108,61 @@ Check that `ai_reader` really is read-only (prints the order count, then must fa
 uv run python -c "import os, psycopg, dotenv; dotenv.load_dotenv(); c = psycopg.connect(os.environ['AI_DATABASE_URL']); print(c.execute('SELECT count(*) FROM wolt.orders').fetchone()); c.execute('DELETE FROM wolt.orders')"
 ```
 
+## The AI on the server
+
+The agent (`src/tema_ops/agent/agent.py`) answers questions about the data using Gemini on Vertex AI.
+
+**How the server logs in to Gemini:** with no key and no password. The VM runs as its own Google
+service account, `tema-ops-vm@tema-ops-prod.iam.gserviceaccount.com`, which has exactly one role:
+`roles/aiplatform.user` (may call Vertex AI models). Someone who broke into the server could use
+Gemini with it, and nothing else in the Google Cloud project.
+
+The VM's access scope is `cloud-platform` (all Google services). That's Google's recommended
+setup: the scope stays wide, and the account's role decides what is actually allowed.
+
+How it was set up (on the Mac). Changing the account needs the VM stopped for about a minute:
+
+```bash
+gcloud iam service-accounts create tema-ops-vm --display-name="tema-ops server" --project=tema-ops-prod
+gcloud projects add-iam-policy-binding tema-ops-prod --member="serviceAccount:tema-ops-vm@tema-ops-prod.iam.gserviceaccount.com" --role="roles/aiplatform.user" --condition=None
+gcloud compute instances stop tema-ops-server --zone=europe-west3-a --project=tema-ops-prod
+gcloud compute instances set-service-account tema-ops-server --zone=europe-west3-a --project=tema-ops-prod --service-account=tema-ops-vm@tema-ops-prod.iam.gserviceaccount.com --scopes=cloud-platform
+gcloud compute instances start tema-ops-server --zone=europe-west3-a --project=tema-ops-prod
+```
+
+After the start, check that the database came back (see "Start / stop").
+
+**AI settings (server `.env`, not in git):**
+
+| Variable | What |
+|---|---|
+| `AI_DATABASE_URL` | DB login as `ai_reader` (read-only, see "Database users") |
+| `AI_MODEL` | which model, e.g. `google_genai:gemini-3.8-flash` |
+| `GOOGLE_CLOUD_PROJECT` | `tema-ops-prod` |
+| `GOOGLE_CLOUD_LOCATION` | `global`. Gemini models only work there; EU regions return 404. |
+| `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT` | tracing: every question, SQL query and answer is recorded in LangSmith |
+
+**Ask a question on the server:**
+
+```bash
+cd ~/tema-ops-server && uv run python src/tema_ops/agent/agent.py
+```
+
+An empty line quits. It remembers the last 5 questions of the conversation until it quits.
+
+**Run the agent on the Mac, with the server's data.** The Mac's own database isn't updated
+daily, so connect to the server's database through an SSH tunnel:
+
+1. In a separate terminal tab, start the tunnel and leave it running:
+
+   ```bash
+   gcloud compute ssh tema-ops-server --zone=europe-west3-a --project=tema-ops-prod -- -N -L 5433:localhost:5432
+   ```
+
+2. In the Mac `.env`, `AI_DATABASE_URL` uses port `5433` (the tunnel) instead of `5432` (the Mac's own database).
+
+On the Mac, Gemini uses your own Google login: `gcloud auth application-default login`.
+
 ## Check the jobs
 
 Run on the server.
@@ -199,6 +255,18 @@ gcloud compute instances start tema-ops-server --zone=europe-west3-a --project=t
 
 While stopped, the daily Wolt update does not run. If it stays stopped for long, the Wolt token chain can die.
 
+After every start (by you, or by Google for maintenance), check that the database is running:
+
+```bash
+cd ~/tema-ops-server && sudo docker compose ps     # the db line must say "Up" or "running"
+```
+
+It should start by itself (`restart: unless-stopped` in `docker-compose.yml`). If the list is empty, start it:
+
+```bash
+sudo docker compose up -d db
+```
+
 ## Moving to a new server (e.g. Hetzner)
 
 Everything below is tied to *this* machine and has to be redone on the new one.
@@ -211,7 +279,14 @@ Everything below is tied to *this* machine and has to be redone on the new one.
 6. **Cron**: copy the lines from `crontab -l`.
 7. **Auto-deploy key** (lets GitHub Actions run `deploy.sh`): add the same `command="…/scripts/deploy.sh",restrict ssh-ed25519 …` line to `~/.ssh/authorized_keys` on the new server.
 8. **GitHub Actions secrets**: update the server IP and its host key (known_hosts) to the new server's.
-9. **Google Cloud cleanup**, so it stops costing money:
+9. **Gemini login**: a server outside Google Cloud has no service account attached. Create a key file for `tema-ops-vm`:
+
+   ```bash
+   gcloud iam service-accounts keys create tema-ops-vm-key.json --iam-account=tema-ops-vm@tema-ops-prod.iam.gserviceaccount.com
+   ```
+
+   Copy it to the new server (never into git, and delete it from the Mac afterwards), then add `GOOGLE_APPLICATION_CREDENTIALS=/home/<user>/tema-ops-vm-key.json` to `.env`. Keep the `tema-ops-vm` account in Google Cloud; the key belongs to it.
+10. **Google Cloud cleanup**, so it stops costing money:
    ```bash
    gcloud compute instances delete tema-ops-server --zone=europe-west3-a --project=tema-ops-prod
    gcloud compute addresses delete tema-ops-ip --region=europe-west3 --project=tema-ops-prod

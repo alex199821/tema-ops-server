@@ -17,7 +17,7 @@ def run_sql(query: str) -> str:
     Returns at most 200 rows."""
     try:
         with psycopg.connect(os.environ["AI_DATABASE_URL"]) as conn:
-            cur = conn.execute(query)
+            cur = conn.execute(query, prepare=True)  # Postgres refuses more than one statement
             if cur.description is None:
                 return "The query ran but did not return a table."
             columns = [c.name for c in cur.description]
@@ -38,3 +38,4 @@ def run_sql(query: str) -> str:
 if __name__ == "__main__":
     print(run_sql.invoke("SELECT id, name FROM branches ORDER BY id"))
     print(run_sql.invoke("DELETE FROM wolt.orders"))
+    print(run_sql.invoke("SET statement_timeout = 0; SELECT 1"))
