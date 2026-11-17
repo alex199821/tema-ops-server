@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Backs up the whole database to the Google Cloud Storage bucket.
 # Run every day by cron, through run_job.py, so a failure sends an alert email.
+# The bucket comes from BACKUP_BUCKET in .env.
 # Usage: ./scripts/backup_db.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 export PATH="/snap/bin:$PATH"   # cron doesn't look in /snap/bin, where gcloud lives on this server
-BUCKET=gs://tema-ops-prod-db-backups
+BUCKET=$(grep '^BACKUP_BUCKET=' .env | cut -d= -f2- || true)
+: "${BUCKET:?BACKUP_BUCKET is missing in .env}"
 FILE=/tmp/ops_$(date +%Y-%m-%d_%H%M).dump
 trap 'rm -f "$FILE"' EXIT       # always delete the local copy at the end, success or failure
 
