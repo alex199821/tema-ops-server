@@ -1,0 +1,22 @@
+# Keeps the WhatsApp bot running: starts it at boot, restarts it if it stops.
+# Install once on the server:
+#   sudo cp scripts/tema-bot.service /etc/systemd/system/
+#   sudo systemctl enable --now tema-bot
+# Logs:  journalctl -u tema-bot -f
+[Unit]
+Description=Tema WhatsApp bot
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User=macbook
+WorkingDirectory=/home/macbook/tema-ops-server
+# 127.0.0.1 = only Caddy (on this machine) can reach the bot; the internet goes through HTTPS
+ExecStart=/home/macbook/.local/bin/uv run uvicorn tema_ops.whatsapp.app:app --host 127.0.0.1 --port 8000
+# print(...) shows up in the logs right away
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

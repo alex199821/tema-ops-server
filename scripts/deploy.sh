@@ -18,6 +18,9 @@ main() {
   echo "== Restart Caddy (picks up Caddyfile changes; the certificate is kept)"
   sudo docker compose --profile server up -d --force-recreate caddy
 
+  echo "== Restart the WhatsApp bot (loads the new code)"
+  sudo systemctl restart tema-bot
+
   echo "== Deployed: $(git log -1 --format='%h %s')"
 }
 
