@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import hmac
 import os
+import time
 
 import httpx
 from dotenv import load_dotenv
@@ -23,13 +24,13 @@ XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 seen_ids = set()  # Meta sometimes delivers the same message twice
 
 # People often send one question as several quick messages ("hi", "how are you?",
-# "report for yesterday"). Instead of answering each one, the bot waits until the person
-# has been quiet for WAIT_SECONDS, then answers everything they sent at once.
+# "report for yesterday"). The bot answers only after the person has been quiet for
+# WAIT_SECONDS. If more messages arrive while it is still thinking, it throws that answer
+# away (and out of its memory) and answers everything together.
 WAIT_SECONDS = 5
-waiting = {}   # phone -> messages not answered yet: ("text", body) or ("audio", media id)
-timers = {}    # phone -> the pending "answer after the wait" task
-locks = {}     # phone -> lock, so one person never gets two answers being made at once
-tasks = set()  # keeps running tasks alive until they finish
+waiting = {}       # phone -> messages not taken yet: ("text", body) or ("audio", media id)
+last_message = {}  # phone -> when the person's latest message arrived
+workers = {}       # phone -> the task answering this person (at most one per person)
 
 
 def send_text(to, text):
@@ -67,8 +68,8 @@ def download_media(media_id):
     file.raise_for_status()
     return file.content, info.json()["mime_type"]
 
-def answer_all(phone, items):
-    # Turn the collected messages into one question (voice messages become text first)
+def to_text(phone, items):
+    # Voice messages become text. Returns all texts, and separately what we heard in voice
     texts, heard = [], []
     for kind, value in items:
         if kind == "text":
@@ -84,37 +85,74 @@ def answer_all(phone, items):
             continue
         texts.append(said)
         heard.append(said)
-    if texts:
-        answer(phone, "\n".join(texts), heard="\n".join(heard) or None)
+    return texts, heard
 
-async def answer_after_wait(phone):
-    # A new message from the same person cancels this wait and starts a fresh one
-    await asyncio.sleep(WAIT_SECONDS)
-    # The person has been quiet long enough: take everything they sent so far
-    items = waiting.pop(phone)
-    del timers[phone]
-    async with locks.setdefault(phone, asyncio.Lock()):
-        # The agent is slow and not async, so it runs in a separate thread
-        await asyncio.to_thread(answer_all, phone, items)
+def memory_point(phone):
+    # Where this person's conversation stands right now (None = no conversation yet)
+    state = agent.get_state({"configurable": {"thread_id": phone}})
+    return state.config["configurable"].get("checkpoint_id")
 
-def answer(phone, question, heard=None):
-    # Runs after Meta already got its "ok", because the agent can take 10+ seconds
+def think(phone, question, start):
+    # Runs the agent from memory point `start`, so an answer we threw away is never remembered
+    config = {"configurable": {"thread_id": phone}}
+    if start:
+        config["configurable"]["checkpoint_id"] = start
+    else:
+        agent.checkpointer.delete_thread(phone)  # there was no conversation before: start empty
+    result = agent.invoke({"messages": [{"role": "user", "content": question}]}, config=config)
+    messages = result["messages"]
+    # Files made for THIS question only (the memory also holds older questions' files)
+    last_question = max(i for i, m in enumerate(messages) if m.type == "human")
+    files = [m.artifact for m in messages[last_question:] if getattr(m, "artifact", None)]
+    return messages[-1].text, files
+
+def send_answer(phone, reply, files, heard):
+    if heard:  # voice message: show what we heard, so a mishearing is easy to spot
+        heard_text = "\n".join(heard)
+        reply = f"🎤 გავიგე: {heard_text}\n\n{reply}"
+    send_text(phone, reply)
+    for path in files:
+        send_document(phone, path)
+
+async def wait_until_quiet(phone):
+    # Sleep until the person has sent nothing for WAIT_SECONDS
+    while (quiet := time.monotonic() - last_message[phone]) < WAIT_SECONDS:
+        await asyncio.sleep(WAIT_SECONDS - quiet)
+
+async def answer_person(phone):
+    # Slow work (voice, the agent, sending) runs in a separate thread, so the bot keeps
+    # receiving messages meanwhile
     try:
-        result = agent.invoke({"messages": [{"role": "user", "content": question}]},
-                              config={"configurable": {"thread_id": phone}})
-        messages = result["messages"]
-        reply = messages[-1].text
-        if heard:  # voice message: show what we heard, so a mishearing is easy to spot
-            reply = f"🎤 გავიგე: {heard}\n\n{reply}"
-        send_text(phone, reply)
-        # Files made for THIS question only (the memory also holds older questions' files)
-        last_question = max(i for i, m in enumerate(messages) if m.type == "human")
-        for message in messages[last_question:]:
-            if getattr(message, "artifact", None):
-                send_document(phone, message.artifact)
+        start = await asyncio.to_thread(memory_point, phone)
+        texts, heard = [], []
+        while True:
+            await wait_until_quiet(phone)
+            new_texts, new_heard = await asyncio.to_thread(to_text, phone, waiting.pop(phone, []))
+            texts += new_texts
+            heard += new_heard
+            if not texts:
+                return
+            try:
+                reply, files = await asyncio.to_thread(think, phone, "\n".join(texts), start)
+            except Exception as e:
+                print("Failed to answer", phone, ":", e)
+                await asyncio.to_thread(send_text, phone, "ბოდიში, პასუხი ვერ მოვამზადე. სცადეთ ხელახლა.")
+                return
+            # Last check before sending: did the person write more while the bot was thinking?
+            if waiting.get(phone):
+                print("New message while answering, answering everything together:", phone)
+                continue  # the next run starts from `start` again, so this answer is forgotten
+            await asyncio.to_thread(send_answer, phone, reply, files, heard)
+            return
     except Exception as e:
         print("Failed to answer", phone, ":", e)
-        send_text(phone, "ბოდიში, პასუხი ვერ მოვამზადე. სცადეთ ხელახლა.")
+    finally:
+        del workers[phone]
+        if waiting.get(phone):  # a message came in while the answer was being sent
+            start_worker(phone)
+
+def start_worker(phone):
+    workers[phone] = asyncio.create_task(answer_person(phone))
 
 def is_from_meta(body, signature):
     # Meta signs every webhook call with our app secret. Without the secret,
@@ -158,11 +196,7 @@ async def receive(request: Request):
                     waiting.setdefault(phone, []).append(("audio", message["audio"]["id"]))
                 else:
                     continue
-                # (Re)start the wait: answer only after WAIT_SECONDS without a new message
-                if phone in timers:
-                    timers[phone].cancel()
-                task = asyncio.create_task(answer_after_wait(phone))
-                tasks.add(task)
-                task.add_done_callback(tasks.discard)
-                timers[phone] = task
+                last_message[phone] = time.monotonic()
+                if phone not in workers:  # otherwise the running one picks the message up
+                    start_worker(phone)
     return {"ok": True}
