@@ -20,15 +20,23 @@ Answer in the language of the question. Keep answers short."""
 
 MAX_QUESTIONS = 5
 
+def what_ai_reads(messages):
+    # The last MAX_QUESTIONS questions with their final answers, plus every step of the
+    # current question. Older SQL steps and result tables are left out: they made the
+    # AI's input about 40% bigger (slower, costlier) and follow-ups query fresh data anyway.
+    # (The full conversation stays stored; this only decides what the AI is shown.)
+    questions = [i for i, m in enumerate(messages) if m.type == "human"]
+    if not questions:
+        return messages
+    start = questions[-MAX_QUESTIONS] if len(questions) > MAX_QUESTIONS else 0
+    current = questions[-1]
+    older = [m for m in messages[start:current]
+             if m.type == "human" or (m.type == "ai" and not m.tool_calls)]
+    return older + messages[current:]
+
 @wrap_model_call
 def keep_last_questions(request, handler):
-    # Cut right before a question, so a SQL call and its result always stay together
-    messages = request.messages
-    questions = [i for i, m in enumerate(messages) if m.type == "human"]
-    if len(questions) > MAX_QUESTIONS:
-        start = questions[-MAX_QUESTIONS]
-        request = request.override(messages=messages[start:])
-    return handler(request)
+    return handler(request.override(messages=what_ai_reads(request.messages)))
 
 
 def load_glossaries():
