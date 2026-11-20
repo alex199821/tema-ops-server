@@ -37,11 +37,13 @@ def load_glossaries():
     return "\n\n".join(f.read_text(encoding="utf-8") for f in files)
 
 
-def build_agent():
+def build_agent(channel_rules=""):
+    # channel_rules: how answers must look where they are read (e.g. WhatsApp on a phone)
+    parts = [INSTRUCTIONS, channel_rules, load_glossaries()]
     return create_agent(
         get_model(),
         tools=[run_sql, get_wolt_report],
-        system_prompt=INSTRUCTIONS + "\n\n" + load_glossaries(),
+        system_prompt="\n\n".join(part for part in parts if part),
         middleware=[keep_last_questions, ModelFallbackMiddleware(get_model(priority=True))],
         checkpointer=InMemorySaver(),  # remembers the conversation until the program stops
     )

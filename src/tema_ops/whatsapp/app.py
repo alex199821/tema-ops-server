@@ -14,8 +14,15 @@ from tema_ops.agent.voice import transcribe
 
 load_dotenv()
 
+WHATSAPP_RULES = """Your reply is read in WhatsApp on a phone.
+- WhatsApp shows *bold*, _italic_ and lists ("- " or "1. "). It does not show tables,
+  # headings or **double stars**, so never use them.
+- Start with the answer itself (the key number), then the details.
+- Rows of data (per day, per branch, ...): one short line per row, for example:
+  *13 Nov*: 101 (Sanapiro 31 · Lisi 43 · Dolabauri 27)"""
+
 app = FastAPI()
-agent = build_agent()  # one agent; each phone number is its own conversation
+agent = build_agent(WHATSAPP_RULES)  # one agent; each phone number is its own conversation
 ALLOWED_NUMBERS = set(os.environ["WHATSAPP_ALLOWED_NUMBERS"].split(","))
 APP_SECRET = os.environ["WHATSAPP_APP_SECRET"].encode() 
 SEND_URL = f"https://graph.facebook.com/v25.0/{os.environ['WHATSAPP_PHONE_NUMBER_ID']}/messages"
