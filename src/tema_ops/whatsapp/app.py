@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import os
 
 import httpx
@@ -13,6 +15,7 @@ load_dotenv()
 app = FastAPI()
 agent = build_agent()  # one agent; each phone number is its own conversation
 ALLOWED_NUMBERS = set(os.environ["WHATSAPP_ALLOWED_NUMBERS"].split(","))
+APP_SECRET = os.environ["WHATSAPP_APP_SECRET"].encode() 
 SEND_URL = f"https://graph.facebook.com/v25.0/{os.environ['WHATSAPP_PHONE_NUMBER_ID']}/messages"
 MEDIA_URL = SEND_URL.replace("/messages", "/media")
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -84,6 +87,12 @@ def answer(phone, question, heard=None):
         print("Failed to answer", phone, ":", e)
         send_text(phone, "ბოდიში, პასუხი ვერ მოვამზადე. სცადეთ ხელახლა.")
 
+def is_from_meta(body, signature):
+    # Meta signs every webhook call with our app secret. Without the secret,
+    # nobody can produce a matching signature, so fake messages are rejected.
+    expected = "sha256=" + hmac.new(APP_SECRET, body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature or "")  # safe comparison
+
 
 # Meta checks the URL once, when you click "Verify and save":
 # it sends our verify token and expects its "challenge" number back.
@@ -99,6 +108,10 @@ def verify(request: Request):
 # Meta sends every incoming WhatsApp message here (a POST with JSON)
 @app.post("/webhook")
 async def receive(request: Request, background: BackgroundTasks):
+    body = await request.body()  # the raw bytes, exactly as Meta signed them
+    if not is_from_meta(body, request.headers.get("X-Hub-Signature-256")):
+        print("Rejected a webhook call without a valid Meta signature")
+        raise HTTPException(status_code=403)
     data = await request.json()
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):
@@ -114,5 +127,4 @@ async def receive(request: Request, background: BackgroundTasks):
                     background.add_task(answer, phone, message["text"]["body"])
                 elif message["type"] == "audio":
                     background.add_task(answer_voice, phone, message["audio"]["id"])
-    return {"ok": True}
     return {"ok": True}

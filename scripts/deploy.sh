@@ -15,6 +15,9 @@ main() {
   echo "== Apply migrations"
   scripts/migrate.sh
 
+  echo "== Restart Caddy (picks up Caddyfile changes; the certificate is kept)"
+  sudo docker compose --profile server up -d --force-recreate caddy
+
   echo "== Deployed: $(git log -1 --format='%h %s')"
 }
 
