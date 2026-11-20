@@ -15,6 +15,19 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
- 
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    profiles: ["server"]   # only starts on the server, not on the Mac
+    network_mode: host     # listens on 80/443 directly, reaches the bot on localhost:8000
+    environment:
+      BOT_DOMAIN: ${BOT_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # keeps the certificate across restarts
+      - caddy_config:/config
+
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:

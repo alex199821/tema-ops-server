@@ -1,0 +1,5 @@
+# HTTPS front door: gets a free certificate for the domain automatically
+# and passes every request to the bot on port 8000.
+{$BOT_DOMAIN} {
+	reverse_proxy localhost:8000
+}
