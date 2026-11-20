@@ -17,13 +17,20 @@ Open work, most important first. Remove a line when it's done; git keeps the his
 - [ ] **No live write access from the Mac.** Point the Mac's `DATABASE_URL` back to the local
   database; only `AI_DATABASE_URL` (read-only) goes through the tunnel.
 
-## WhatsApp bot: before real users
+## WhatsApp bot: rollout
 
-- [ ] Check Meta's signature (`X-Hub-Signature-256`, app secret) on every webhook call, so only
-  Meta can send messages to the bot.
-- [ ] Permanent token from a System User (temporary tokens expire after about an hour).
-- [ ] Real setup under Tema's own business portfolio (with Tema's admin), its own phone number.
-- [ ] Run the bot on the server: a domain with HTTPS, and a service that restarts by itself.
+- [ ] Revoke the extra access token the Meta dashboard ("Send message" step) generated; it was
+  shown in a screenshot. The server uses its own System User token.
+- [ ] **One answer for a burst of messages.** "hi" / "how are you?" / "report for yesterday"
+  sent within seconds now get 3 separate answers. Wait a few seconds after each message
+  (reset the wait when another one comes in), then answer all of them together once.
+- [ ] The 5 employees' numbers in `WHATSAPP_ALLOWED_NUMBERS`; daily-report template with a
+  "Show report" button.
+- [ ] Caddy: pass only `/webhook` to the bot, answer everything else itself (scanners hit the
+  bot every few seconds). Remove the unused GCP firewall rule `default-allow-rdp`.
+- [ ] Privacy policy on the domain (e.g. `https://<BOT_DOMAIN>/privacy`); then fill Meta's
+  "Data deletion instructions URL" (Meta rejected the GitHub link there).
+- [ ] Document Caddy + the bot service in `docs/server.md` (`BOT_DOMAIN`, install commands).
 
 ## Soon
 

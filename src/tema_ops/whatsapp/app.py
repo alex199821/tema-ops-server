@@ -1,10 +1,11 @@
+import asyncio
 import hashlib
 import hmac
 import os
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
 from tema_ops.agent.agent import build_agent
@@ -20,6 +21,15 @@ SEND_URL = f"https://graph.facebook.com/v25.0/{os.environ['WHATSAPP_PHONE_NUMBER
 MEDIA_URL = SEND_URL.replace("/messages", "/media")
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 seen_ids = set()  # Meta sometimes delivers the same message twice
+
+# People often send one question as several quick messages ("hi", "how are you?",
+# "report for yesterday"). Instead of answering each one, the bot waits until the person
+# has been quiet for WAIT_SECONDS, then answers everything they sent at once.
+WAIT_SECONDS = 5
+waiting = {}   # phone -> messages not answered yet: ("text", body) or ("audio", media id)
+timers = {}    # phone -> the pending "answer after the wait" task
+locks = {}     # phone -> lock, so one person never gets two answers being made at once
+tasks = set()  # keeps running tasks alive until they finish
 
 
 def send_text(to, text):
@@ -57,17 +67,36 @@ def download_media(media_id):
     file.raise_for_status()
     return file.content, info.json()["mime_type"]
 
-def answer_voice(phone, media_id):
-    try:
-        audio, mime_type = download_media(media_id)
-        # WhatsApp says "audio/ogg; codecs=opus"; Gemini wants just "audio/ogg"
-        question = transcribe(audio, mime_type.split(";")[0])
-    except Exception as e:
-        print("Failed to transcribe", phone, ":", e)
-        send_text(phone, "ბოდიში, ხმოვანი შეტყობინება ვერ გავიგე. სცადეთ ხელახლა ან დაწერეთ.")
-        return
-    answer(phone, question, heard=question)
-    
+def answer_all(phone, items):
+    # Turn the collected messages into one question (voice messages become text first)
+    texts, heard = [], []
+    for kind, value in items:
+        if kind == "text":
+            texts.append(value)
+            continue
+        try:
+            audio, mime_type = download_media(value)
+            # WhatsApp says "audio/ogg; codecs=opus"; Gemini wants just "audio/ogg"
+            said = transcribe(audio, mime_type.split(";")[0])
+        except Exception as e:
+            print("Failed to transcribe", phone, ":", e)
+            send_text(phone, "ბოდიში, ხმოვანი შეტყობინება ვერ გავიგე. სცადეთ ხელახლა ან დაწერეთ.")
+            continue
+        texts.append(said)
+        heard.append(said)
+    if texts:
+        answer(phone, "\n".join(texts), heard="\n".join(heard) or None)
+
+async def answer_after_wait(phone):
+    # A new message from the same person cancels this wait and starts a fresh one
+    await asyncio.sleep(WAIT_SECONDS)
+    # The person has been quiet long enough: take everything they sent so far
+    items = waiting.pop(phone)
+    del timers[phone]
+    async with locks.setdefault(phone, asyncio.Lock()):
+        # The agent is slow and not async, so it runs in a separate thread
+        await asyncio.to_thread(answer_all, phone, items)
+
 def answer(phone, question, heard=None):
     # Runs after Meta already got its "ok", because the agent can take 10+ seconds
     try:
@@ -107,7 +136,7 @@ def verify(request: Request):
 
 # Meta sends every incoming WhatsApp message here (a POST with JSON)
 @app.post("/webhook")
-async def receive(request: Request, background: BackgroundTasks):
+async def receive(request: Request):
     body = await request.body()  # the raw bytes, exactly as Meta signed them
     if not is_from_meta(body, request.headers.get("X-Hub-Signature-256")):
         print("Rejected a webhook call without a valid Meta signature")
@@ -124,7 +153,16 @@ async def receive(request: Request, background: BackgroundTasks):
                     print("Ignored a message from an unknown number:", phone)
                     continue
                 if message["type"] == "text":
-                    background.add_task(answer, phone, message["text"]["body"])
+                    waiting.setdefault(phone, []).append(("text", message["text"]["body"]))
                 elif message["type"] == "audio":
-                    background.add_task(answer_voice, phone, message["audio"]["id"])
+                    waiting.setdefault(phone, []).append(("audio", message["audio"]["id"]))
+                else:
+                    continue
+                # (Re)start the wait: answer only after WAIT_SECONDS without a new message
+                if phone in timers:
+                    timers[phone].cancel()
+                task = asyncio.create_task(answer_after_wait(phone))
+                tasks.add(task)
+                task.add_done_callback(tasks.discard)
+                timers[phone] = task
     return {"ok": True}
