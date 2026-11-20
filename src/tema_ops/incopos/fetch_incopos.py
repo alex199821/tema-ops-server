@@ -86,7 +86,8 @@ def main():
         save_json(OUT_DIR / "items.json", items)
         print(f"Items: {len(items)}")
         locations = inco.get("location")
-
+        save_json(OUT_DIR / "locations.json", locations)
+    
         day = start
         while day <= end:
             for loc in locations:
