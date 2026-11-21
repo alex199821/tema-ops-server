@@ -65,8 +65,7 @@ and a weekly report finds deeper patterns. Code finds the changes; the AI only w
 
 ## WhatsApp bot: rollout
 
-- [ ] The 5 employees' numbers in `WHATSAPP_ALLOWED_NUMBERS` (2 set so far).
-- [ ] Remove the unused GCP firewall rule `default-allow-rdp` (port 3389, Windows Remote Desktop).
+- [ ] The 5 employees' numbers in `WHATSAPP_ALLOWED_NUMBERS` (3 set so far).
 - [ ] Privacy policy on the domain (e.g. `https://<BOT_DOMAIN>/privacy`); then fill Meta's
   "Data deletion instructions URL" (Meta rejected the GitHub link there).
 
