@@ -2,6 +2,52 @@
 
 Open work, most important first. Remove a line when it's done; git keeps the history.
 
+## Main goal: daily insights for the CEO
+
+The CEO uses the reports to know what is happening in the branches (e.g. "burger sales are
+down at one branch: is it only there, or everywhere?"). Goal: the bot tells her every day,
+and a weekly report finds deeper patterns. Code finds the changes; the AI only writes them up.
+
+- [ ] **IncoPOS for the other 4 branches.** Ask the vendor for an app ID + secret per branch (or
+  one key for all locations), and how far back their cloud has each branch. Test one old day
+  per branch, then download the whole history on the server in the background (~40 s per
+  day: about 2–3 days for 2 years × 4 branches). Then a daily IncoPOS fetch on cron, and map
+  each IncoPOS location to its branch. (Location "ახალი კაფე" opened 2026-09-03; that's why
+  the API has nothing for it before that date.)
+- [ ] **Company context for the agents**, in the DB (not in git: the repo is public):
+  - branch facts: name in each system (Wolt, IncoPOS, shift SMS), opening date, coordinates,
+    kind of place, which branches are close and share customers
+  - an events timeline (date, branch, what happened): price changes, new menu items, closed
+    days, renovations, new branches or competitors nearby, influencer videos
+- [ ] **Daily "what changed" message** to the CEO in WhatsApp:
+  - code compares yesterday with the same weekday of the last 4 weeks (store + Wolt) and flags
+    only changes that are big **and** have enough volume (Wolt alone is too small per product:
+    0–5 burgers a day per branch)
+  - for each flag, code checks the other branches: only here (local cause) or everywhere
+    (outside cause), plus what else changed (rejected orders, a product stopped selling at
+    16:00, reviews, weather, events). Shown as "possible reasons", never as the cause.
+  - Flash writes 2–4 Georgian lines from the flagged rows only. Every day, also when nothing
+    happened ("all stable"), so silence never means "broken".
+  - 👍/👎 per line to tune the thresholds (and to measure how useful it is)
+  - a bot-started message needs a Meta-approved utility template. This replaces the planned
+    fixed daily report with a "Show report" button.
+- [ ] **Google Sheets**: the daily tables in one sheet she can open and filter on her phone,
+  replacing the Excel files.
+- [ ] **TikTok videos.** Tema doesn't advertise, but influencers post about it. No clean API
+  (TikTok's research API is for academics only; scraping breaks TikTok's terms), so: whoever sees
+  a video forwards the link to the bot, and it is saved as an event (the post time comes from
+  the video ID; creator, branch, views). A spike that nothing explains → the bot asks "was there
+  a TikTok?".
+- [ ] **Start recording who works which shift** (if it's only on paper today, it's lost every day).
+- [ ] **Weekly deep research** (after IncoPOS history, the daily message and the eval set):
+  researcher agents in parallel (products, shifts, branches, reviews, weather) write ideas →
+  an independent checker agent re-runs the numbers and tests each idea on other weeks/years
+  → 3–5 findings a week, each with a number, how sure, an action and an experiment that would
+  prove the cause (e.g. a promo in one branch only). Built backwards from the CEO's real
+  decisions (menu, prices, promos, staff per shift, how much to prepare). Pro model.
+  Sources in order: IncoPOS, shifts, Google reviews, weather; social media needs full control of
+  the Facebook Page; road traffic skipped (no history to download).
+
 ## Next: tests and evals
 
 - [ ] **CI: tests before every deploy.** GitHub Actions runs `pytest` (and a linter, `ruff`)
@@ -19,18 +65,10 @@ Open work, most important first. Remove a line when it's done; git keeps the his
 
 ## WhatsApp bot: rollout
 
-- [ ] Revoke the extra access token the Meta dashboard ("Send message" step) generated; it was
-  shown in a screenshot. The server uses its own System User token.
-- [ ] **One answer for a burst of messages.** "hi" / "how are you?" / "report for yesterday"
-  sent within seconds now get 3 separate answers. Wait a few seconds after each message
-  (reset the wait when another one comes in), then answer all of them together once.
-- [ ] The 5 employees' numbers in `WHATSAPP_ALLOWED_NUMBERS`; daily-report template with a
-  "Show report" button.
-- [ ] Caddy: pass only `/webhook` to the bot, answer everything else itself (scanners hit the
-  bot every few seconds). Remove the unused GCP firewall rule `default-allow-rdp`.
+- [ ] The 5 employees' numbers in `WHATSAPP_ALLOWED_NUMBERS` (2 set so far).
+- [ ] Remove the unused GCP firewall rule `default-allow-rdp` (port 3389, Windows Remote Desktop).
 - [ ] Privacy policy on the domain (e.g. `https://<BOT_DOMAIN>/privacy`); then fill Meta's
   "Data deletion instructions URL" (Meta rejected the GitHub link there).
-- [ ] Document Caddy + the bot service in `docs/server.md` (`BOT_DOMAIN`, install commands).
 
 ## Soon
 
@@ -47,15 +85,21 @@ Open work, most important first. Remove a line when it's done; git keeps the his
 
 ## AI agent
 
+- [ ] **Faster answers.** Measured 2026-11-20 (LangSmith, 18 answers): ~100% of the time is
+  Gemini calls, SQL ~0%. Worst cases are single calls hanging 24–94 s at Google. Fix first:
+  a ~20 s timeout on the normal model so the existing priority fallback takes over. Then:
+  glossary examples for common questions (fewer SQL rounds; avg 3.2, max 9 AI calls per
+  answer), and a lower thinking level (needs the eval set first).
 - [ ] Result checker (Reflection): a second look at the SQL and the answer before replying.
 - [ ] Save questions and answers in our own DB table once the bot has real users
   (LangSmith keeps traces only 14 days on the free plan). Needs a DB user that may write
   only that table.
 - [ ] Conversations that survive restarts: replace `InMemorySaver` with a Postgres checkpointer.
+  (Today every deploy restarts the bot, so everyone's conversation starts over.)
 
 ## Product
 
 - [ ] Shift sheet: ask the manager whether orders are counted by the time they came in (now)
   or the delivery time. Changing it is one word in `SHIFTS_SQL`.
-- [ ] New departments, each with its own folder, `glossary.md` and tools: store sales
-  (cash register), expenses.
+- [ ] New departments, each with its own folder, `glossary.md` and tools: expenses.
+  (Store sales: see "IncoPOS for the other 4 branches".)

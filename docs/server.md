@@ -221,6 +221,109 @@ daily, so connect to the server's database through an SSH tunnel:
 
 On the Mac, Gemini uses your own Google login: `gcloud auth application-default login`.
 
+## The WhatsApp bot
+
+Employees chat with the AI agent in WhatsApp. The bot (`src/tema_ops/whatsapp/app.py`) runs
+all the time on the server, unlike the cron jobs.
+
+**How a message reaches the bot:**
+
+```
+phone → WhatsApp (Meta) → https://<BOT_DOMAIN>/webhook → Caddy (HTTPS, ports 80/443)
+      → the bot on 127.0.0.1:8000 → AI agent → reply through Meta's API → phone
+```
+
+- **Caddy** (`Caddyfile`, a Docker container in `docker-compose.yml`) is the HTTPS front door.
+  It gets a free Let's Encrypt certificate for `BOT_DOMAIN` by itself, renews it by itself, and
+  passes only `/webhook` to the bot. Every other address gets `404` from Caddy itself: those
+  are robots that scan the whole internet for `/.env`, `/wp-login.php` and so on, and they never
+  reach the bot. The certificate is kept in the `caddy_data` volume.
+- **The bot** listens only on `127.0.0.1`, so the internet can reach it only through Caddy.
+- **The domain** was bought at Cloudflare Registrar and renews once a year. Its DNS has an `A`
+  record pointing to the static IP, set to **DNS only** (grey cloud, not proxied). The name is in
+  the server `.env` as `BOT_DOMAIN` and kept out of git.
+- **Firewall:** the GCP rule `allow-web` opens tcp 80 and 443 (80 is needed for the certificate).
+
+**What the bot does with a message:**
+
+- Ignores numbers that are not in `WHATSAPP_ALLOWED_NUMBERS`, and requests that are not signed by
+  Meta (checked with `WHATSAPP_APP_SECRET`).
+- Waits until the person has been quiet for 5 seconds, then answers all their messages at once.
+  If a new message arrives while it is thinking, it throws that answer away and answers
+  everything together.
+- Voice messages are written down by Gemini first. The reply starts with what it heard.
+- Each phone number is its own conversation, kept **in memory**: every restart (and so every
+  deploy) starts everyone's conversation over.
+
+**Bot settings (server `.env`, not in git).** The bot reads `.env` only when it starts, so
+**restart it after every change** (`sudo systemctl restart tema-bot`):
+
+| Variable | What |
+|---|---|
+| `BOT_DOMAIN` | the bot's domain name, used by Caddy |
+| `WHATSAPP_TOKEN` | token of the Meta system user `tema-ops`; never expires |
+| `WHATSAPP_PHONE_NUMBER_ID` | the bot number's ID in Meta (not the phone number itself) |
+| `WHATSAPP_APP_SECRET` | Meta app → App settings → Basic → App secret; checks that requests come from Meta |
+| `WHATSAPP_VERIFY_TOKEN` | any random text (`openssl rand -hex 16`); Meta must send the same one when the webhook is set up |
+| `WHATSAPP_ALLOWED_NUMBERS` | who may use the bot: country code + number, no `+`, comma-separated, **no spaces**, e.g. `995555123456,995577654321` |
+
+**Add a person:** add their number to `WHATSAPP_ALLOWED_NUMBERS` (`nano .env`), then
+`sudo systemctl restart tema-bot`. They message the bot's number first; until then the bot can't
+write to them (WhatsApp only allows free replies within 24 hours of the person's last message).
+
+**On Meta's side** (developers.facebook.com, app **Tema**, in the business portfolio **Tema**):
+
+- WhatsApp → Configuration → Webhook: callback URL `https://<BOT_DOMAIN>/webhook`, verify token =
+  `WHATSAPP_VERIFY_TOKEN`, webhook field `messages` subscribed.
+- The app must stay **published** (Live). An unpublished app gets no real messages.
+- **New token:** business.facebook.com → Settings → Users → System users → `tema-ops` →
+  Generate token → app Tema, expiration Never, permissions `whatsapp_business_messaging` and
+  `whatsapp_business_management`. Put it in `WHATSAPP_TOKEN` and restart the bot.
+  "Revoke tokens" there cancels **all** of `tema-ops`' tokens, including the bot's.
+
+**Check that it works** (on the Mac or anywhere):
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" https://<BOT_DOMAIN>/webhook
+```
+
+`403` = all good (Caddy and the bot are up; the bot refuses because there is no verify token).
+`502` = Caddy is up but the bot is down. No answer at all = Caddy, the firewall or DNS.
+
+**Logs** (on the server):
+
+```bash
+journalctl -u tema-bot -f                                    # the bot, live (Ctrl+C to stop)
+journalctl -u tema-bot --since "1 hour ago" --no-pager       # the last hour
+cd ~/tema-ops-server && sudo docker compose logs caddy --tail 30   # Caddy, e.g. certificate problems
+```
+
+- `Ignored a message from an unknown number` = someone not in `WHATSAPP_ALLOWED_NUMBERS`.
+- `GET /webhook … 403` from an unknown address = a robot trying the one open address. Harmless:
+  without Meta's verify token or signature the bot refuses.
+- `status=143` after a restart is normal (the old process was told to stop).
+
+**Who keeps it running:** `systemd`, Linux's service manager. `scripts/tema-bot.service` tells it
+to start the bot at boot and restart it 5 seconds after a crash. Caddy restarts by itself too
+(`restart: unless-stopped`).
+
+```bash
+sudo systemctl status tema-bot      # running? since when?
+sudo systemctl restart tema-bot     # after a .env change
+```
+
+**Install on a new server** (once):
+
+```bash
+cd ~/tema-ops-server
+sudo cp scripts/tema-bot.service /etc/systemd/system/
+sudo systemctl enable --now tema-bot                 # start now and at every boot
+sudo docker compose --profile server up -d caddy     # needs BOT_DOMAIN in .env and DNS pointing here
+gcloud compute firewall-rules create allow-web --project=tema-ops-prod --allow=tcp:80,tcp:443 --source-ranges=0.0.0.0/0   # once per project (on Google Cloud)
+```
+
+The `server` profile keeps Caddy from starting on the Mac.
+
 ## Check the jobs
 
 Run on the server.
@@ -261,18 +364,25 @@ git checkout main && git merge develop && git push && git checkout develop
 
 1. GitHub sees the push to `main` and runs `.github/workflows/deploy.yml` on one of its own machines.
 2. That machine connects to the server over SSH using the deploy key (see below).
-3. The server runs `scripts/deploy.sh`, which does three things:
+3. The server runs `scripts/deploy.sh`, which does five things:
    - `git pull --ff-only`: downloads the new code
    - `uv sync`: installs new or changed libraries
    - `scripts/migrate.sh`: runs any new file in `db/migrations/`. Each file runs only once; the database records which ones ran (table `schema_migrations`).
+   - restarts Caddy, so `Caddyfile` changes apply (the certificate is kept)
+   - restarts the WhatsApp bot, so it runs the new code. This also starts everyone's bot conversation over.
 
-Nothing needs restarting. Cron starts the scripts from scratch each time, so the next run uses the new code.
+The cron jobs need no restart: cron starts the scripts from scratch each time, so the next run uses the new code.
+
+A change to `scripts/deploy.sh` itself takes effect one deploy later: the server has already
+started the old version of the script before `git pull` downloads the new one.
 
 **Not deployed automatically.** Do these by hand on the server:
 
-- changes to `.env`
+- changes to `.env` (then `sudo systemctl restart tema-bot`, see "The WhatsApp bot")
 - changes to the crontab (`crontab -e`)
 - DB user passwords
+- changes to `scripts/tema-bot.service`: copy it again, then
+  `sudo systemctl daemon-reload && sudo systemctl restart tema-bot`
 
 **Check a deploy** (on the Mac), or open GitHub → repo → **Actions** tab:
 
@@ -332,19 +442,22 @@ Everything below is tied to *this* machine and has to be redone on the new one.
 1. **New machine**: Ubuntu, timezone `Asia/Tbilisi`, clone the repo, run `./scripts/setup_server.sh`.
 2. **GitHub read-only deploy key** (lets the server `git pull`): make a new one on the new server and add it in GitHub → repo Settings → Deploy keys. Delete the old one.
 3. **Secrets, copied by hand**: `.env`, then the DB user passwords (see "Database users").
-4. **Data**: run a backup by hand on the old server, then restore it on the new one (see "Backups"). The new server reads the bucket with the `tema-ops-vm` key from step 9. Stop the old server's cron first, so no new orders arrive after the backup.
+4. **Data**: run a backup by hand on the old server, then restore it on the new one (see "Backups"). The new server reads the bucket with the `tema-ops-vm` key from step 10. Stop the old server's cron first, so no new orders arrive after the backup.
 5. **Wolt token**: move `auth/wolt.json` and **stop the old server's cron first**. Only one machine may ever renew the token, otherwise the chain dies.
 6. **Cron**: copy the lines from `crontab -l`.
 7. **Auto-deploy key** (lets GitHub Actions run `deploy.sh`): add the same `command="…/scripts/deploy.sh",restrict ssh-ed25519 …` line to `~/.ssh/authorized_keys` on the new server.
 8. **GitHub Actions secrets**: update the server IP and its host key (known_hosts) to the new server's.
-9. **Gemini login**: a server outside Google Cloud has no service account attached. Create a key file for `tema-ops-vm`:
+9. **WhatsApp bot**: point the domain's DNS `A` record to the new IP, open ports 80/443 in the
+   new provider's firewall, then follow "Install on a new server" in "The WhatsApp bot". The
+   webhook URL in Meta stays the same, because the domain stays the same.
+10. **Gemini login**: a server outside Google Cloud has no service account attached. Create a key file for `tema-ops-vm`:
 
    ```bash
    gcloud iam service-accounts keys create tema-ops-vm-key.json --iam-account=tema-ops-vm@tema-ops-prod.iam.gserviceaccount.com
    ```
 
    Copy it to the new server (never into git, and delete it from the Mac afterwards), then add `GOOGLE_APPLICATION_CREDENTIALS=/home/<user>/tema-ops-vm-key.json` to `.env`. Keep the `tema-ops-vm` account in Google Cloud; the key belongs to it.
-10. **Google Cloud cleanup**, so it stops costing money:
+11. **Google Cloud cleanup**, so it stops costing money:
    ```bash
    gcloud compute instances delete tema-ops-server --zone=europe-west3-a --project=tema-ops-prod
    gcloud compute addresses delete tema-ops-ip --region=europe-west3 --project=tema-ops-prod

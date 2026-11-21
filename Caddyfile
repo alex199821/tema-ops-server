@@ -1,5 +1,12 @@
-# HTTPS front door: gets a free certificate for the domain automatically
-# and passes every request to the bot on port 8000.
+# HTTPS front door: gets a free certificate for the domain automatically.
+# Only /webhook (where Meta sends WhatsApp messages) goes to the bot on port 8000.
+# Everything else (robots scanning the internet for /.env, /wp-login.php, ...)
+# gets "404 not found" from Caddy itself and never reaches the bot.
 {$BOT_DOMAIN} {
-	reverse_proxy localhost:8000
+	handle /webhook {
+		reverse_proxy localhost:8000
+	}
+	handle {
+		respond 404
+	}
 }
