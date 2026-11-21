@@ -45,15 +45,20 @@ def load_glossaries():
     return "\n\n".join(f.read_text(encoding="utf-8") for f in files)
 
 
-def build_agent(channel_rules=""):
+def build_agent(channel_rules="", remember=True):
     # channel_rules: how answers must look where they are read (e.g. WhatsApp on a phone)
+    # remember=True: the agent itself remembers earlier questions, in RAM only (lost when the
+    #   program stops). For the terminal chat at the bottom of this file.
+    # remember=False: the agent remembers nothing between questions. The WhatsApp bot uses
+    #   this: it saves every answer to the database right after sending it, and hands the
+    #   agent the earlier questions and answers itself (app.py, think).
     parts = [INSTRUCTIONS, channel_rules, load_glossaries()]
     return create_agent(
         get_model(),
         tools=[run_sql, get_wolt_report],
         system_prompt="\n\n".join(part for part in parts if part),
         middleware=[keep_last_questions, ModelFallbackMiddleware(get_model(priority=True))],
-        checkpointer=InMemorySaver(),  # remembers the conversation until the program stops
+        checkpointer=InMemorySaver() if remember else None,
     )
 
 

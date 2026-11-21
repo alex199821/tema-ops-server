@@ -3,14 +3,16 @@ import hashlib
 import hmac
 import os
 import time
+from datetime import datetime
 
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
-from tema_ops.agent.agent import build_agent
+from tema_ops.agent.agent import MAX_QUESTIONS, build_agent
 from tema_ops.agent.voice import transcribe
+from tema_ops.whatsapp.history import last_questions, save_answer
 
 load_dotenv()
 
@@ -22,7 +24,7 @@ WHATSAPP_RULES = """Your reply is read in WhatsApp on a phone.
   *13 Nov*: 101 (Sanapiro 31 · Lisi 43 · Dolabauri 27)"""
 
 app = FastAPI()
-agent = build_agent(WHATSAPP_RULES)  # one agent; each phone number is its own conversation
+agent = build_agent(WHATSAPP_RULES, remember=False)  # memory is in the database (history.py)
 ALLOWED_NUMBERS = set(os.environ["WHATSAPP_ALLOWED_NUMBERS"].split(","))
 APP_SECRET = os.environ["WHATSAPP_APP_SECRET"].encode() 
 SEND_URL = f"https://graph.facebook.com/v25.0/{os.environ['WHATSAPP_PHONE_NUMBER_ID']}/messages"
@@ -33,10 +35,11 @@ seen_ids = set()  # Meta sometimes delivers the same message twice
 # People often send one question as several quick messages ("hi", "how are you?",
 # "report for yesterday"). The bot answers only after the person has been quiet for
 # WAIT_SECONDS. If more messages arrive while it is still thinking, it throws that answer
-# away (and out of its memory) and answers everything together.
+# away (it is never sent or saved) and answers everything together.
 WAIT_SECONDS = 5
 waiting = {}       # phone -> messages not taken yet: ("text", body) or ("audio", media id)
-last_message = {}  # phone -> when the person's latest message arrived
+last_message = {}  # phone -> when the person's latest message arrived (for the waiting)
+asked_at = {}      # phone -> the same, as a clock time (saved with the answer)
 workers = {}       # phone -> the task answering this person (at most one per person)
 
 
@@ -94,23 +97,18 @@ def to_text(phone, items):
         heard.append(said)
     return texts, heard
 
-def memory_point(phone):
-    # Where this person's conversation stands right now (None = no conversation yet)
-    state = agent.get_state({"configurable": {"thread_id": phone}})
-    return state.config["configurable"].get("checkpoint_id")
-
-def think(phone, question, start):
-    # Runs the agent from memory point `start`, so an answer we threw away is never remembered
-    config = {"configurable": {"thread_id": phone}}
-    if start:
-        config["configurable"]["checkpoint_id"] = start
-    else:
-        agent.checkpointer.delete_thread(phone)  # there was no conversation before: start empty
-    result = agent.invoke({"messages": [{"role": "user", "content": question}]}, config=config)
+def think(phone, question):
+    # The AI gets the person's earlier questions and answers (from the database) and the
+    # new question. MAX_QUESTIONS counts the new question too.
+    messages = []
+    for old_question, old_answer in last_questions(phone, MAX_QUESTIONS - 1):
+        messages.append({"role": "user", "content": old_question})
+        messages.append({"role": "assistant", "content": old_answer})
+    messages.append({"role": "user", "content": question})
+    result = agent.invoke({"messages": messages})
     messages = result["messages"]
-    # Files made for THIS question only (the memory also holds older questions' files)
-    last_question = max(i for i, m in enumerate(messages) if m.type == "human")
-    files = [m.artifact for m in messages[last_question:] if getattr(m, "artifact", None)]
+    # Files made for this question (the earlier answers from the database have none)
+    files = [m.artifact for m in messages if getattr(m, "artifact", None)]
     return messages[-1].text, files
 
 def send_answer(phone, reply, files, heard):
@@ -130,7 +128,6 @@ async def answer_person(phone):
     # Slow work (voice, the agent, sending) runs in a separate thread, so the bot keeps
     # receiving messages meanwhile
     try:
-        start = await asyncio.to_thread(memory_point, phone)
         texts, heard = [], []
         while True:
             await wait_until_quiet(phone)
@@ -139,8 +136,10 @@ async def answer_person(phone):
             heard += new_heard
             if not texts:
                 return
+            # All messages so far are one question (a voice message = the text we heard)
+            question, asked = "\n".join(texts), asked_at[phone]
             try:
-                reply, files = await asyncio.to_thread(think, phone, "\n".join(texts), start)
+                reply, files = await asyncio.to_thread(think, phone, question)
             except Exception as e:
                 print("Failed to answer", phone, ":", e)
                 await asyncio.to_thread(send_text, phone, "ბოდიში, პასუხი ვერ მოვამზადე. სცადეთ ხელახლა.")
@@ -148,8 +147,13 @@ async def answer_person(phone):
             # Last check before sending: did the person write more while the bot was thinking?
             if waiting.get(phone):
                 print("New message while answering, answering everything together:", phone)
-                continue  # the next run starts from `start` again, so this answer is forgotten
+                continue  # this answer is never sent or saved, so it is forgotten
             await asyncio.to_thread(send_answer, phone, reply, files, heard)
+            # Saved only once it was sent: the AI's answer, without the "🎤 heard" line
+            try:
+                await asyncio.to_thread(save_answer, phone, asked, question, reply)
+            except Exception as e:  # the person got the answer; only the bot's memory of it is lost
+                print("Failed to save the answer", phone, ":", e)
             return
     except Exception as e:
         print("Failed to answer", phone, ":", e)
@@ -204,6 +208,7 @@ async def receive(request: Request):
                 else:
                     continue
                 last_message[phone] = time.monotonic()
+                asked_at[phone] = datetime.now()
                 if phone not in workers:  # otherwise the running one picks the message up
                     start_worker(phone)
     return {"ok": True}

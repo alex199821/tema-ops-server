@@ -80,8 +80,10 @@ Created by `db/migrations/003_roles.sql`. Passwords are **not** in git; they are
 | `ops` | everything (owner) | migrations only (`docker compose exec ... psql -U ops`) | none |
 | `wolt_writer` | read/write rows in `wolt.*`, read `branches` | all current scripts (daily update, report) | `DATABASE_URL` |
 | `ai_reader` | read only, queries stopped after 10 s | the AI sandbox | `AI_DATABASE_URL` |
+| `bot_writer` | add and read rows in `whatsapp.questions` only (`007_whatsapp.sql`) | the WhatsApp bot's memory | `BOT_DATABASE_URL` |
 
 Tables added later get the same rights automatically, so `ai_reader` can read every new table too. For sensitive tables (salaries etc.), revoke it: `REVOKE SELECT ON <table> FROM ai_reader;`
+The bot's questions and answers are in their own schema `whatsapp` on purpose: `ai_reader` can't read them, so one person's questions never show up in someone else's answer.
 
 **On a new server (or new Mac DB), in this order:**
 
@@ -252,8 +254,18 @@ phone → WhatsApp (Meta) → https://<BOT_DOMAIN>/webhook → Caddy (HTTPS, por
   If a new message arrives while it is thinking, it throws that answer away and answers
   everything together.
 - Voice messages are written down by Gemini first. The reply starts with what it heard.
-- Each phone number is its own conversation, kept **in memory**: every restart (and so every
-  deploy) starts everyone's conversation over.
+- Each phone number is its own conversation, kept in the database (table `whatsapp.questions`),
+  so restarts and deploys don't wipe it. One row per answer that was sent: several quick
+  messages are one question, a voice message is saved as the text it heard, and the answer is
+  saved without the "🎤 heard" line. Before answering, the AI gets the person's last 4 questions
+  and answers, plus the new question.
+
+**Read a person's conversation** (`sudo docker compose exec db psql -U ops -d ops`, then):
+
+```sql
+SELECT asked_at, question, answer FROM whatsapp.questions WHERE phone = '995XXXXXXXXX' ORDER BY id;
+SELECT phone, count(*) AS questions, max(answered_at) AS last_used FROM whatsapp.questions GROUP BY phone;
+```
 
 **Bot settings (server `.env`, not in git).** The bot reads `.env` only when it starts, so
 **restart it after every change** (`sudo systemctl restart tema-bot`):
@@ -266,6 +278,7 @@ phone → WhatsApp (Meta) → https://<BOT_DOMAIN>/webhook → Caddy (HTTPS, por
 | `WHATSAPP_APP_SECRET` | Meta app → App settings → Basic → App secret; checks that requests come from Meta |
 | `WHATSAPP_VERIFY_TOKEN` | any random text (`openssl rand -hex 16`); Meta must send the same one when the webhook is set up |
 | `WHATSAPP_ALLOWED_NUMBERS` | who may use the bot: country code + number, no `+`, comma-separated, **no spaces**, e.g. `995555123456,995577654321` |
+| `BOT_DATABASE_URL` | `postgresql://bot_writer:<password>@localhost:5432/ops`; the password is set with `\password bot_writer` (see "Database users") |
 
 **Add a person:** add their number to `WHATSAPP_ALLOWED_NUMBERS` (`nano .env`), then
 `sudo systemctl restart tema-bot`. They message the bot's number first; until then the bot can't
@@ -369,7 +382,7 @@ git checkout main && git merge develop && git push && git checkout develop
    - `uv sync`: installs new or changed libraries
    - `scripts/migrate.sh`: runs any new file in `db/migrations/`. Each file runs only once; the database records which ones ran (table `schema_migrations`).
    - restarts Caddy, so `Caddyfile` changes apply (the certificate is kept)
-   - restarts the WhatsApp bot, so it runs the new code. This also starts everyone's bot conversation over.
+   - restarts the WhatsApp bot, so it runs the new code. Conversations are kept (they are in the database). A question that is being answered at that moment is lost; the person has to ask again.
 
 The cron jobs need no restart: cron starts the scripts from scratch each time, so the next run uses the new code.
 

@@ -90,11 +90,6 @@ and a weekly report finds deeper patterns. Code finds the changes; the AI only w
   glossary examples for common questions (fewer SQL rounds; avg 3.2, max 9 AI calls per
   answer), and a lower thinking level (needs the eval set first).
 - [ ] Result checker (Reflection): a second look at the SQL and the answer before replying.
-- [ ] Save questions and answers in our own DB table once the bot has real users
-  (LangSmith keeps traces only 14 days on the free plan). Needs a DB user that may write
-  only that table.
-- [ ] Conversations that survive restarts: replace `InMemorySaver` with a Postgres checkpointer.
-  (Today every deploy restarts the bot, so everyone's conversation starts over.)
 
 ## Product
 
