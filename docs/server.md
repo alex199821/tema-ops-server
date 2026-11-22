@@ -50,6 +50,7 @@ gcloud compute ssh tema-ops-server --zone=europe-west3-a --project=tema-ops-prod
 
 | When | What | Script | Log |
 |---|---|---|---|
+| Every day 01:00 | Fetch yesterday's IncoPOS store sales for every location → DB | `incopos/daily_update.py` | `logs/incopos_daily.log` |
 | Every day 12:00 | Fetch yesterday's Wolt orders for all branches → DB | `wolt/daily_update.py` | `logs/daily_update.log` |
 | Every 4 h (+ random 0–60 min) | Renew the Wolt token so the chain stays alive | `wolt/wolt_login.py` | `logs/token.log` |
 | Every day 12:30 | Back up the whole database to Cloud Storage (see "Backups") | `scripts/backup_db.sh` | `logs/backup_db.log` |
@@ -343,13 +344,18 @@ Run on the server.
 
 ```bash
 crontab -l                                                  # what is scheduled
-tail -20 ~/tema-ops-server/logs/daily_update.log            # last daily update output
+tail -20 ~/tema-ops-server/logs/incopos_daily.log           # last IncoPOS daily update
+tail -20 ~/tema-ops-server/logs/daily_update.log            # last Wolt daily update output
 tail -5 ~/tema-ops-server/logs/token.log                    # last Wolt token renewals
+tail -5 ~/tema-ops-server/logs/backup_db.log                # last database backups
 tail -5 ~/tema-ops-server/logs/send_report.log              # last report emails
 journalctl -u cron --since today | grep run_job             # proof cron started the jobs (and when)
 ```
 
-A good daily run ends with 3 `loaded <venue_id> <date>` lines (one per branch), then `DONE`.
+A good Wolt daily run ends with 3 `loaded <venue_id> <date>` lines (one per branch), then `DONE`.
+A good IncoPOS daily run has `Downloading <location> <date>` and `N sales` for each location,
+then `loaded data/incopos/<location id>/<date>.json: N receipts`, `Done: …`, `DONE`. There are
+fewer receipts than sales: the API repeats some receipts, and each is stored once.
 
 Test the alert email (fails on purpose, no Wolt involved):
 
@@ -361,6 +367,7 @@ Redo one day by hand (on the server):
 
 ```bash
 cd ~/tema-ops-server && uv run python src/tema_ops/wolt/daily_update.py 2026-11-07
+cd ~/tema-ops-server && uv run python src/tema_ops/incopos/daily_update.py 2026-11-07   # IncoPOS (~1.5 min)
 ```
 
 ## Auto-deploy (GitHub Actions)

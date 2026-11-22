@@ -11,9 +11,10 @@ and a weekly report finds deeper patterns. Code finds the changes; the AI only w
 - [ ] **IncoPOS for the other 4 branches.** Ask the vendor for an app ID + secret per branch (or
   one key for all locations), and how far back their cloud has each branch. Test one old day
   per branch, then download the whole history on the server in the background (~40 s per
-  day: about 2–3 days for 2 years × 4 branches). Then a daily IncoPOS fetch on cron, and map
-  each IncoPOS location to its branch. (Location "ახალი კაფე" opened 2026-09-03; that's why
-  the API has nothing for it before that date.)
+  day: about 2–3 days for 2 years × 4 branches), and map each IncoPOS location to its branch.
+  The daily job (`incopos/daily_update.py`, 01:00) already fetches every location the key can
+  see; if each branch gets its own key, the scripts need a list of keys instead of one.
+  (Location "ახალი კაფე" opened 2026-09-03; that's why the API has nothing for it before that date.)
 - [ ] **Company context for the agents**, in the DB (not in git: the repo is public):
   - branch facts: name in each system (Wolt, IncoPOS, shift SMS), opening date, coordinates,
     kind of place, which branches are close and share customers
@@ -81,6 +82,9 @@ and a weekly report finds deeper patterns. Code finds the changes; the AI only w
   `renew FAILED: 401`), only the developer can fix it today. Write a step-by-step guide:
   incognito window → log in to merchant.wolt.com → copy the refresh token → save it on the server.
 - [ ] **Check the first report email** reached the manager (16 November, 13:00): `logs/send_report.log`.
+- [ ] **LangSmith: deprecated API endpoint, stops working 31 Jan 2027** (banner seen 2026-11-22:
+  the `tema-ops` key called 1 deprecated endpoint in 7 days). Probably fixed by updating the
+  `langsmith` library (`uv lock --upgrade-package langsmith`); check with LangSmith's "How to migrate".
 
 ## AI agent
 
