@@ -37,6 +37,11 @@ ON CONFLICT (id) DO UPDATE SET
     retail_price = EXCLUDED.retail_price, deleted = EXCLUDED.deleted, raw = EXCLUDED.raw
 """
 
+UPSERT_GROUP = """
+INSERT INTO incopos.item_groups (id, name, code) VALUES (%s, %s, %s)
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, code = EXCLUDED.code
+"""
+
 INSERT_SALE = """
 INSERT INTO incopos.sales (location_id, id, paid_at, raw) VALUES (%s, %s, %s, %s)
 """
@@ -67,9 +72,11 @@ def read_json(path: Path):
 
 
 def load_reference(cur):
-    """Branches (locations) and products. Always replaced with the latest download."""
+    """Branches (locations), product groups and products. Always replaced with the latest download."""
     for loc in read_json(DATA_DIR / "locations.json"):
         cur.execute(UPSERT_LOCATION, (loc["Id"], loc["Name"]))
+    for group in read_json(DATA_DIR / "item_groups.json"):
+        cur.execute(UPSERT_GROUP, (group["Id"], group["Name"], group["Code"]))
     for item in read_json(DATA_DIR / "items.json"):
         cur.execute(UPSERT_ITEM, (item["Id"], item["Name"], item["GroupId"], item["MeasureUnit"],
                                   number(item["RetailPrice"]), item["Deleted"], Jsonb(item)))

@@ -85,6 +85,8 @@ def main():
         items = inco.get("item", include_availability=False)
         save_json(OUT_DIR / "items.json", items)
         print(f"Items: {len(items)}")
+        groups = inco.get("item_group")
+        save_json(OUT_DIR / "item_groups.json", groups)
         locations = inco.get("location")
         save_json(OUT_DIR / "locations.json", locations)
     

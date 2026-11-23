@@ -81,7 +81,6 @@ and a weekly report finds deeper patterns. Code finds the changes; the AI only w
 - [ ] **Token recovery guide for managers.** If the Wolt token chain breaks (alert:
   `renew FAILED: 401`), only the developer can fix it today. Write a step-by-step guide:
   incognito window → log in to merchant.wolt.com → copy the refresh token → save it on the server.
-- [ ] **Check the first report email** reached the manager (16 November, 13:00): `logs/send_report.log`.
 - [ ] **LangSmith: deprecated API endpoint, stops working 31 Jan 2027** (banner seen 2026-11-22:
   the `tema-ops` key called 1 deprecated endpoint in 7 days). Probably fixed by updating the
   `langsmith` library (`uv lock --upgrade-package langsmith`); check with LangSmith's "How to migrate".
@@ -97,7 +96,5 @@ and a weekly report finds deeper patterns. Code finds the changes; the AI only w
 
 ## Product
 
-- [ ] Shift sheet: ask the manager whether orders are counted by the time they came in (now)
-  or the delivery time. Changing it is one word in `SHIFTS_SQL`.
 - [ ] New departments, each with its own folder, `glossary.md` and tools: expenses.
   (Store sales: see "IncoPOS for the other 4 branches".)
