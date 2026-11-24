@@ -105,7 +105,6 @@ GROUP BY 1, 2
 """
 
 NOTES = {
-    "jump": "დააჭირეთ: გადადის ბოლო თვეზე. ყოველ ღამე თავისით ახლდება.",
     "product": "დღე = წინა დღის 21:00-დან ამ დღის 21:00-მდე (ღამის და დღის ცვლა), როგორც სალაროს წიგნში.\n"
                "ყოველ ღამე რობოტი ახლებს მხოლოდ ბოლო თვის IncoPOS-ის უჯრებს (ფასი, გაყიდული დღეებში, "
                "თვითღირებულება). გასული თვეები არ იცვლება: იქ შეგიძლიათ ხელით შეცვალოთ.",
@@ -400,7 +399,7 @@ def update_branch(sheet, conn, location_id: int, view, costs: dict, day: datetim
     newest_label = month_label(months[-1])
     cells[1, 2] = f'=HYPERLINK("#gid={view.id}&range={column(tab.months[newest_label])}1","→ {newest_label}")'
     formats += [_style(view.id, 1, 2, 1, 2, {"textFormat": {"bold": True, "fontSize": 12, "foregroundColor": BLUE}}),
-                _note(view.id, 1, 2, NOTES["jump"])]
+                _note(view.id, 1, 2, "")]  # no note here: it would hide the link's pop-up
 
     # 6. The IncoPOS cells: new months, the newest month, and the month(s) of --day
     refresh = set(new_months) | {newest_label}
