@@ -6,13 +6,14 @@
   redraws the whole tab.
 - "<branch> — მონაცემები" (hidden, one per branch): one row per day and product: how many were
   sold and what customers paid. The robot writes it; the formulas read it.
-- "ფასები და თვითღირებულება": one line per month and product. The robot fills the month's price
-  from IncoPOS; people fill and edit the cost (თვითღირებულება). A new month starts with the
-  previous month's cost, and changing a month's cost changes only that month.
+- "ფასები და თვითღირებულება": costs only, one line per month and product (თვე | პროდუქტი |
+  თვითღირებულება). People fill and edit the cost. The robot adds the lines for a new month with
+  the previous month's cost, so changing a month's cost changes only that month.
 
 Where the numbers come from (the sheet says the same in its notes):
 - a day = 21:00 the evening before -> 21:00, like the cash book (night + day shift)
 - შემოსავალი = what customers really paid on the IncoPOS receipts ÷ 1.18 (VAT)
+- გაყიდვის ფასი = შემოსავალი ÷ გაყიდული, i.e. the IncoPOS price that month without VAT
 - მოგება = შემოსავალი − გაყიდული × that month's თვითღირებულება; empty when there's no cost
 
 Everything is rewritten on every run (B1 goes back to the newest month); people's costs are kept.
@@ -32,7 +33,7 @@ import psycopg
 from dotenv import find_dotenv, load_dotenv
 from gspread.utils import rowcol_to_a1
 
-PRICES_TAB = "ფასები და თვითღირებულება"
+COSTS_TAB = "ფასები და თვითღირებულება"   # costs per month: თვე | პროდუქტი | თვითღირებულება
 MONTHS = ["იანვარი", "თებერვალი", "მარტი", "აპრილი", "მაისი", "ივნისი", "ივლისი",
           "აგვისტო", "სექტემბერი", "ოქტომბერი", "ნოემბერი", "დეკემბერი"]
 NO_GROUP = "სხვა"                         # section for a product that has no group in IncoPOS
@@ -79,31 +80,18 @@ GROUP BY 1, 2, 3
 ORDER BY 1 DESC, 3
 """
 
-# Each product's price in each month: the price on its newest receipt of that month (VAT included)
-PRICES_SQL = """
-SELECT DISTINCT ON (1, 2)
-       date_trunc('month', s.paid_at + interval '3 hours')::date AS month,
-       i.name,
-       l.price
-FROM incopos.sale_lines l
-JOIN incopos.sales s ON s.location_id = l.location_id AND s.id = l.sale_id
-JOIN incopos.items i ON i.id = l.item_id
-WHERE l.location_id = %s
-ORDER BY 1, 2, s.paid_at DESC
-"""
-
 NOTES = {
     "pick": "აირჩიეთ თვე ამ უჯრის ისრით: მთელი ჩანართი იმ თვეს აჩვენებს.\n"
             "დღე = წინა დღის 21:00-დან ამ დღის 21:00-მდე (ღამის და დღის ცვლა), როგორც სალაროს წიგნში.\n"
             "მონაცემები IncoPOS-დან მოდის ყოველ ღამე. აქ ხელით შეცვლილი წაიშლება.",
     "first_day": "არჩეული თვის პირველი დღე (B1-დან). ყველა ფორმულა ამას იყენებს.",
     "cost": "ამ თვის თვითღირებულება ჩანართიდან „ფასები და თვითღირებულება“.",
-    "price": "ამ თვის ფასი დღგ-ის გარეშე ჩანართიდან „ფასები და თვითღირებულება“ (IncoPOS-ის ფასი ÷ 1.18).",
+    "price": "შემოსავალი ÷ გაყიდული: IncoPOS-ის ფასი ამ თვეში, დღგ-ის გარეშე.\n"
+             "თუ ფასი თვის შუაში შეიცვალა, აქ საშუალოა.",
     "unit_profit": "ერთ ცალზე: გაყიდვის ფასი − თვითღირებულება.",
     "money": "ამ დღეებში IncoPOS-ის ჩეკებით რეალურად გადახდილი თანხა ÷ 1.18 (დღგ-ის გარეშე).\n"
              "თუ ფასი თვის შუაში არ შეცვლილა, ეს = გაყიდული × გაყიდვის ფასი.",
     "profit": "შემოსავალი − გაყიდული × თვითღირებულება. ცარიელია, თუ თვითღირებულება არ აქვს.",
-    "price_table": "IncoPOS-ის ფასი ამ თვეში (ბოლო ჩეკის ფასი). რობოტი წერს ყოველ ღამე.",
     "cost_table": "აქ შეიყვანეთ ან შეცვალეთ. ახალ თვეს რობოტი წინა თვის თვითღირებულებას გადაიტანს.\n"
                   "ერთი თვის შეცვლა მხოლოდ იმ თვეზე მოქმედებს.",
 }
@@ -133,65 +121,62 @@ def read_sales(conn, location_id):
     return conn.execute(SALES_SQL, (location_id, location_id)).fetchall()
 
 
-def read_prices(conn, location_id) -> dict:
-    """{(month label, product): price with VAT}"""
-    return {(month_label(month), name): price
-            for month, name, price in conn.execute(PRICES_SQL, (location_id,)).fetchall()}
-
-
-def read_price_table(tab) -> tuple[dict, dict]:
-    """What people have in the prices tab. Returns ({(month, product): [price, cost]}, {product: cost}).
-    The second dict is only filled from the old layout (product | price | price | cost),
-    so its costs can start every month once."""
+def read_cost_table(tab) -> tuple[dict, dict]:
+    """The costs people have in the costs tab, found by the column headings.
+    Returns ({(month, product): cost}, {product: cost}). The second one is only for a tab
+    without a თვე column (the first layout): its costs then start every month."""
     rows = tab.get_all_values(value_render_option="UNFORMATTED_VALUE")
-    if not rows:
+    head = [str(h).strip() for h in rows[0]] if rows else []
+    if "პროდუქტი" not in head or "თვითღირებულება" not in head:
         return {}, {}
-    if str(rows[0][0]).strip() == "პროდუქტი":  # the old layout, before months
-        return {}, {str(r[0]).strip(): r[3] for r in rows[1:] if len(r) > 3 and str(r[0]).strip() and r[3] != ""}
-    table = {}
+    p, c = head.index("პროდუქტი"), head.index("თვითღირებულება")
+    m = head.index("თვე") if "თვე" in head else None
+    by_month, by_product = {}, {}
     for r in rows[1:]:
-        r = list(r) + [""] * 5
-        if str(r[0]).strip() and str(r[1]).strip():
-            table[str(r[0]).strip(), str(r[1]).strip()] = [r[2], r[4]]
-    return table, {}
+        r = list(r) + [""] * len(head)
+        name, cost = str(r[p]).strip(), r[c]
+        if not name:
+            continue
+        if m is None:
+            if cost != "":
+                by_product[name] = cost
+        elif str(r[m]).strip():
+            by_month[str(r[m]).strip(), name] = cost
+    return by_month, by_product
 
 
-def build_price_table(table: dict, old_costs: dict, prices: dict) -> list:
-    """Every month and product that sold, plus every line people already have.
-    The robot refreshes the price; a cost people entered is never changed; a new line
-    gets the product's cost from the month before."""
-    keys = set(table) | set(prices)
-    last_cost = {}  # product -> cost of its latest month so far
+def build_cost_table(by_month: dict, by_product: dict, sales) -> list:
+    """A line for every month and product that sold, plus every line people already have.
+    A cost people entered is never changed; a new line gets the product's cost from the month before."""
+    keys = set(by_month) | {(month_label(day), name) for day, _, name, *_ in sales}
+    last_cost = {}  # product -> its cost in the latest month so far
     lines = {}
     for month, name in sorted(keys, key=lambda k: (label_to_month(k[0]), k[1])):  # oldest month first
-        price, cost = table.get((month, name), ["", ""])
-        if (month, name) in prices:
-            price = prices[month, name]
-        if (month, name) not in table:
-            cost = last_cost.get(name, old_costs.get(name, ""))
+        if (month, name) in by_month:
+            cost = by_month[month, name]
+        else:
+            cost = last_cost.get(name, by_product.get(name, ""))
         if cost != "":
             last_cost[name] = cost
-        lines[month, name] = (price, cost)
-    values = [["თვე", "პროდუქტი", "ფასი დღგ-ით", "ფასი დღგ-ის გარეშე", "თვითღირებულება"]]
+        lines[month, name] = cost
+    values = [["თვე", "პროდუქტი", "თვითღირებულება"]]
     for month, name in sorted(lines, key=lambda k: (-label_to_month(k[0]).toordinal(), k[1])):  # newest first
-        price, cost = lines[month, name]
-        r = len(values) + 1
-        values.append([month, name, "" if price == "" else number(price),
-                       f'=IF(C{r}="","",C{r}/1.18)', "" if cost == "" else number(cost)])
+        cost = lines[month, name]
+        values.append([month, name, "" if cost == "" else number(cost)])
     return values
 
 
 def build_data(sales):
     """The hidden data tab: one row per day and product, and the month list (K:L)."""
-    P = f"'{PRICES_TAB}'!"
+    C = f"'{COSTS_TAB}'!"
     values = [["თარიღი", "პროდუქტი", "ჯგუფი", "გაყიდული", "თანხა დღგ-ით", "თვე",
                "შემოსავალი", "თვითღირებულება", "მოგება", "", "თვე", "პირველი დღე"]]
     for day, group, name, sold, paid in sales:
         r = len(values) + 1
-        cost = (f'IF(COUNTIFS({P}$A:$A,F{r},{P}$B:$B,B{r},{P}$E:$E,"<>")=0,"",'
-                f'SUMIFS({P}$E:$E,{P}$A:$A,F{r},{P}$B:$B,B{r}))')
         values.append([day.isoformat(), name, group or NO_GROUP, number(sold), number(paid), month_label(day),
-                       f"=E{r}/1.18", f"={cost}", f'=IF(H{r}="","",G{r}-D{r}*H{r})', "", "", ""])
+                       f"=E{r}/1.18",
+                       f'=IFERROR(FILTER({C}$C:$C,{C}$A:$A=F{r},{C}$B:$B=B{r}),"")',  # this month's cost
+                       f'=IF(H{r}="","",G{r}-D{r}*H{r})', "", "", ""])
     months = sorted({(day.year, day.month) for day, *_ in sales}, reverse=True)
     for i, (y, m) in enumerate(months):
         values[i + 1][10] = f"{MONTHS[m - 1]} {y}"
@@ -201,7 +186,7 @@ def build_data(sales):
 
 def build_view(sales, months, data_tab: str, view_id: int):
     """The branch tab: the newest month in B1, everything else formulas. Returns (values, requests)."""
-    D, P = f"'{data_tab}'!", f"'{PRICES_TAB}'!"
+    D, C = f"'{data_tab}'!", f"'{COSTS_TAB}'!"
     group_of, group_paid, sold_all = {}, defaultdict(Decimal), defaultdict(Decimal)
     for _, group, name, sold, paid in sales:
         group_of[name] = group or NO_GROUP
@@ -245,10 +230,9 @@ def build_view(sales, months, data_tab: str, view_id: int):
         top = len(grid) + 1
         for name in sorted((n for n in group_of if group_of[n] == group), key=lambda n: (-sold_all[n], n)):
             r, row = new_row()
-            this_month = f"{P}$A:$A,$B$1,{P}$B:$B,$B{r}"
             put(row, 2, name)
-            put(row, 3, f'=IF(COUNTIFS({this_month},{P}$E:$E,"<>")=0,"",SUMIFS({P}$E:$E,{this_month}))')
-            put(row, 4, f'=IF(COUNTIFS({this_month},{P}$C:$C,"<>")=0,"",SUMIFS({P}$C:$C,{this_month})/1.18)')
+            put(row, 3, f'=IFERROR(FILTER({C}$C:$C,{C}$A:$A=$B$1,{C}$B:$B=$B{r}),"")')  # this month's cost
+            put(row, 4, f'=IFERROR((W{r}+AR{r})/(V{r}+AQ{r}),"")')  # შემოსავალი ÷ გაყიდული
             put(row, 5, f'=IF(OR(C{r}="",D{r}=""),"",D{r}-C{r})')
             for d in range(1, 32):
                 c = column(DAY_COLUMN[d])
@@ -319,17 +303,14 @@ def data_requests(data_id: int, rows: int):
     ]
 
 
-def price_requests(tab_id: int, rows: int):
-    """Formats for the prices tab: the cost column is marked as the one people fill in."""
+def cost_requests(tab_id: int, rows: int):
+    """Formats for the costs tab: the cost column is marked as the one people fill in."""
     return [
-        _style(tab_id, 1, 1, 1, 5, BOLD),
-        _style(tab_id, 2, 3, rows, 4, MONEY),
-        _style(tab_id, 2, 5, rows, 5, {"backgroundColor": PICK, **MONEY}),
-        _note(tab_id, 1, 3, NOTES["price_table"]),
-        _note(tab_id, 1, 5, NOTES["cost_table"]),
-        _width(tab_id, 1, 130), _width(tab_id, 2, 220), _width(tab_id, 3, 100), _width(tab_id, 4, 140),
-        _width(tab_id, 5, 120),
-        {"setBasicFilter": {"filter": {"range": _range(tab_id, 1, 1, rows, 5)}}},  # filter by month
+        _style(tab_id, 1, 1, 1, 3, BOLD),
+        _style(tab_id, 2, 3, rows, 3, {"backgroundColor": PICK, **MONEY}),
+        _note(tab_id, 1, 3, NOTES["cost_table"]),
+        _width(tab_id, 1, 130), _width(tab_id, 2, 220), _width(tab_id, 3, 120),
+        {"setBasicFilter": {"filter": {"range": _range(tab_id, 1, 1, rows, 3)}}},  # filter by month
     ]
 
 
@@ -358,7 +339,7 @@ def _width(sheet_id, c, pixels):
 
 def _reset(sheet_id, rows, columns, frozen_rows, frozen_columns):
     """Empties a tab completely (values, colours, notes, merges, dropdowns) and sets its size.
-    (The prices tab's filter isn't cleared: setBasicFilter replaces it afterwards.)"""
+    (The costs tab's filter isn't cleared: setBasicFilter replaces it afterwards.)"""
     return [
         {"unmergeCells": {"range": {"sheetId": sheet_id}}},
         {"updateCells": {"range": {"sheetId": sheet_id}, "fields": "*"}},
@@ -382,10 +363,10 @@ def main():
     load_dotenv(find_dotenv(usecwd=True))  # the .env of the folder it's run from
     creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/spreadsheets"])
     sheet = gspread.authorize(creds).open_by_key(os.environ["SALES_SHEET_ID"])
-    prices_tab = tab(sheet, PRICES_TAB, 2, 5)
-    table, old_costs = read_price_table(prices_tab)
+    costs_tab = tab(sheet, COSTS_TAB, 2, 3)
+    by_month, by_product = read_cost_table(costs_tab)
 
-    branches, prices = [], {}
+    branches, all_sales = [], []
     with psycopg.connect(os.environ["INCOPOS_DATABASE_URL"]) as conn:
         for location_id, location_name in conn.execute("SELECT id, name FROM incopos.locations ORDER BY id").fetchall():
             tab_name = os.environ.get(f"SALES_SHEET_TAB_{location_id}")
@@ -395,16 +376,15 @@ def main():
             if not sales:
                 print(f"{tab_name}: no sales yet, skipped")
                 continue
-            # (one prices tab for all branches: with a second branch, a different price wins by order)
-            prices.update(read_prices(conn, location_id))
+            all_sales += sales
             branches.append((tab_name, f"{location_name} — მონაცემები", sales))
 
-    # 1. The prices tab: people's costs are read above and written back unchanged
-    price_values = build_price_table(table, old_costs, prices)
-    sheet.batch_update({"requests": _reset(prices_tab.id, len(price_values), 5, 1, 2)})
-    prices_tab.update(price_values, "A1", value_input_option="USER_ENTERED")
-    sheet.batch_update({"requests": price_requests(prices_tab.id, len(price_values))})
-    print(f"{PRICES_TAB}: {len(price_values) - 1} lines")
+    # 1. The costs tab (one for all branches): people's costs are read above and written back unchanged
+    cost_values = build_cost_table(by_month, by_product, all_sales)
+    sheet.batch_update({"requests": _reset(costs_tab.id, len(cost_values), 3, 1, 2)})
+    costs_tab.update(cost_values, "A1", value_input_option="USER_ENTERED")
+    sheet.batch_update({"requests": cost_requests(costs_tab.id, len(cost_values))})
+    print(f"{COSTS_TAB}: {len(cost_values) - 1} lines")
 
     # 2. Each branch: its hidden data tab and its month tab
     for tab_name, data_name, sales in branches:
