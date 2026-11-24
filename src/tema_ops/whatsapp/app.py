@@ -12,6 +12,7 @@ from fastapi.responses import PlainTextResponse
 
 from tema_ops.agent.agent import MAX_QUESTIONS, build_agent
 from tema_ops.agent.voice import transcribe
+from tema_ops.notify import alert
 from tema_ops.whatsapp.history import last_questions, save_answer
 
 load_dotenv()
@@ -30,7 +31,10 @@ APP_SECRET = os.environ["WHATSAPP_APP_SECRET"].encode()
 SEND_URL = f"https://graph.facebook.com/v25.0/{os.environ['WHATSAPP_PHONE_NUMBER_ID']}/messages"
 MEDIA_URL = SEND_URL.replace("/messages", "/media")
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+TRIES = 3  # Meta's servers sometimes fail for a moment, so every call to Meta gets 3 tries
 seen_ids = set()  # Meta sometimes delivers the same message twice
+SORRY = "ბოდიში, რაღაც შეფერხდა და პასუხი ვერ მოგწერეთ. სცადეთ ხელახლა."
+VOICE_SORRY = "ბოდიში, ხმოვანი შეტყობინება ვერ გავიგე. სცადეთ ხელახლა ან დაწერეთ."
 
 # People often send one question as several quick messages ("hi", "how are you?",
 # "report for yesterday"). The bot answers only after the person has been quiet for
@@ -43,40 +47,63 @@ asked_at = {}      # phone -> the same, as a clock time (saved with the answer)
 workers = {}       # phone -> the task answering this person (at most one per person)
 
 
+def call_meta(method, url, **kwargs):
+    # Error 5xx, 429 (too many requests) or no connection usually passes within seconds:
+    # wait and try again. Any other error (e.g. 400: Meta refuses our message) would fail
+    # the same way again, so it is raised at once.
+    headers = {"Authorization": f"Bearer {os.environ['WHATSAPP_TOKEN']}"}
+    for attempt in range(1, TRIES + 1):
+        try:
+            response = httpx.request(method, url, headers=headers, timeout=30, **kwargs)
+        except httpx.TransportError as e:
+            problem = f"no connection ({e!r})"
+        else:
+            if response.status_code < 500 and response.status_code != 429:
+                if response.is_error:  # Meta's own text says why, e.g. a bad token
+                    print("Meta refused:", response.status_code, response.text[:500])
+                response.raise_for_status()
+                return response
+            problem = f"{response.status_code} {response.text[:500]}"
+        print(f"Meta call failed (try {attempt} of {TRIES}):", problem)
+        if attempt < TRIES:
+            time.sleep(2 * attempt)  # 2 s, then 4 s
+    raise RuntimeError(f"{method} {url} failed {TRIES} times, last: {problem}")
+
 def send_text(to, text):
-    text = text.replace("**", "") 
-    response = httpx.post(
-        SEND_URL,
-        headers={"Authorization": f"Bearer {os.environ['WHATSAPP_TOKEN']}"},
-        json={"messaging_product": "whatsapp", "to": to, "type": "text",
-              "text": {"body": text[:4096]}},  # WhatsApp's limit per message
-    )
-    response.raise_for_status()
+    text = text.replace("**", "")
+    call_meta("POST", SEND_URL, json={"messaging_product": "whatsapp", "to": to, "type": "text",
+                                      "text": {"body": text[:4096]}})  # WhatsApp's limit
 
 def send_document(to, path):
-    headers = {"Authorization": f"Bearer {os.environ['WHATSAPP_TOKEN']}"}
     filename = os.path.basename(path)
-    # 1. upload the file to Meta, which gives back a media id
     with open(path, "rb") as f:
-        upload = httpx.post(MEDIA_URL, headers=headers,
-                            data={"messaging_product": "whatsapp", "type": XLSX},
-                            files={"file": (filename, f, XLSX)})
-    upload.raise_for_status()
+        content = f.read()  # read once, so a second try uploads the same bytes again
+    # 1. upload the file to Meta, which gives back a media id
+    upload = call_meta("POST", MEDIA_URL, data={"messaging_product": "whatsapp", "type": XLSX},
+                       files={"file": (filename, content, XLSX)})
     # 2. send a message that points to that file
-    response = httpx.post(SEND_URL, headers=headers, json={
+    call_meta("POST", SEND_URL, json={
         "messaging_product": "whatsapp", "to": to, "type": "document",
         "document": {"id": upload.json()["id"], "filename": filename}})
-    response.raise_for_status()
 
 def download_media(media_id):
-    headers = {"Authorization": f"Bearer {os.environ['WHATSAPP_TOKEN']}"}
     # 1. ask Meta where the file is
-    info = httpx.get(f"https://graph.facebook.com/v25.0/{media_id}", headers=headers)
-    info.raise_for_status()
+    info = call_meta("GET", f"https://graph.facebook.com/v25.0/{media_id}").json()
     # 2. download it from there (that link needs the token too)
-    file = httpx.get(info.json()["url"], headers=headers)
-    file.raise_for_status()
-    return file.content, info.json()["mime_type"]
+    file = call_meta("GET", info["url"])
+    return file.content, info["mime_type"]
+
+def give_up(phone, what, error, apology=SORRY):
+    # Never leave the person waiting in silence, and tell the developer at once
+    print("Failed to", what, phone, ":", error)
+    try:
+        alert("WhatsApp bot failed", f"Could not {what} for {phone}.\n\n{error!r}")
+    except Exception as e:
+        print("Failed to email the alert:", e)
+    try:
+        send_text(phone, apology)
+    except Exception as e:  # Meta itself is down: nothing more we can do
+        print("Failed to send the apology", phone, ":", e)
 
 def to_text(phone, items):
     # Voice messages become text. Returns all texts, and separately what we heard in voice
@@ -90,8 +117,7 @@ def to_text(phone, items):
             # WhatsApp says "audio/ogg; codecs=opus"; Gemini wants just "audio/ogg"
             said = transcribe(audio, mime_type.split(";")[0])
         except Exception as e:
-            print("Failed to transcribe", phone, ":", e)
-            send_text(phone, "ბოდიში, ხმოვანი შეტყობინება ვერ გავიგე. სცადეთ ხელახლა ან დაწერეთ.")
+            give_up(phone, "understand a voice message", e, VOICE_SORRY)
             continue
         texts.append(said)
         heard.append(said)
@@ -141,22 +167,25 @@ async def answer_person(phone):
             try:
                 reply, files = await asyncio.to_thread(think, phone, question)
             except Exception as e:
-                print("Failed to answer", phone, ":", e)
-                await asyncio.to_thread(send_text, phone, "ბოდიში, პასუხი ვერ მოვამზადე. სცადეთ ხელახლა.")
+                await asyncio.to_thread(give_up, phone, "prepare an answer", e)
                 return
             # Last check before sending: did the person write more while the bot was thinking?
             if waiting.get(phone):
                 print("New message while answering, answering everything together:", phone)
                 continue  # this answer is never sent or saved, so it is forgotten
-            await asyncio.to_thread(send_answer, phone, reply, files, heard)
+            try:
+                await asyncio.to_thread(send_answer, phone, reply, files, heard)
+            except Exception as e:  # Meta failed even after its retries
+                await asyncio.to_thread(give_up, phone, "send the answer", e)
+                return
             # Saved only once it was sent: the AI's answer, without the "🎤 heard" line
             try:
                 await asyncio.to_thread(save_answer, phone, asked, question, reply)
             except Exception as e:  # the person got the answer; only the bot's memory of it is lost
                 print("Failed to save the answer", phone, ":", e)
             return
-    except Exception as e:
-        print("Failed to answer", phone, ":", e)
+    except Exception as e:  # anything unexpected
+        await asyncio.to_thread(give_up, phone, "answer", e)
     finally:
         del workers[phone]
         if waiting.get(phone):  # a message came in while the answer was being sent
