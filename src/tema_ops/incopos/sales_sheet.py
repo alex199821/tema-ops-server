@@ -456,8 +456,12 @@ def _width(sheet_id, c, pixels):
 
 
 def _reset(sheet_id, rows, columns):
-    """Only the first time: empties the tab (values, colours, notes, merges, dropdowns), sets its size."""
+    """Only the first time: empties the tab (values, colours, notes, merges, dropdowns), sets its size.
+    Unfreezes first: Google refuses a size that would leave no unfrozen column."""
     return [
+        {"updateSheetProperties": {
+            "properties": {"sheetId": sheet_id, "gridProperties": {"frozenRowCount": 0, "frozenColumnCount": 0}},
+            "fields": "gridProperties(frozenRowCount,frozenColumnCount)"}},
         {"unmergeCells": {"range": {"sheetId": sheet_id}}},
         {"updateCells": {"range": {"sheetId": sheet_id}, "fields": "*"}},
         {"updateSheetProperties": {
