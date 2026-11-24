@@ -395,11 +395,16 @@ def update_branch(sheet, conn, location_id: int, view, costs: dict, day: datetim
         if label in new_months or new_products:  # the yellow/green rows' ranges cover the new rows
             cells.update(summary_formulas(tab, col))
 
-    # 5. B1: a link that jumps to the newest month (its title cell)
+    # 5. B1: a link that jumps to the newest month (its title cell). A plain Sheets link, the kind
+    #    Insert -> Link makes: a click shows the link box (a =HYPERLINK formula showed none here).
     newest_label = month_label(months[-1])
-    cells[1, 2] = f'=HYPERLINK("#gid={view.id}&range={column(tab.months[newest_label])}1","→ {newest_label}")'
-    formats += [_style(view.id, 1, 2, 1, 2, {"textFormat": {"bold": True, "fontSize": 12, "foregroundColor": BLUE}}),
-                _note(view.id, 1, 2, "")]  # no note here: it would hide the link's pop-up
+    jump = {"updateCells": {"range": _range(view.id, 1, 2, 1, 2), "rows": [{"values": [{
+                "userEnteredValue": {"stringValue": f"→ {newest_label}"},
+                "userEnteredFormat": {"textFormat": {
+                    "bold": True, "fontSize": 12, "foregroundColor": BLUE,
+                    "link": {"uri": f"#gid={view.id}&range={column(tab.months[newest_label])}1"}}},
+                "note": ""}]}],
+            "fields": "userEnteredValue,userEnteredFormat.textFormat,note"}}
 
     # 6. The IncoPOS cells: new months, the newest month, and the month(s) of --day
     refresh = set(new_months) | {newest_label}
@@ -419,6 +424,10 @@ def update_branch(sheet, conn, location_id: int, view, costs: dict, day: datetim
         sheet.values_batch_update({"valueInputOption": "USER_ENTERED", "data": _ranges(view.title, cells)})
     if formats:
         sheet.batch_update({"requests": formats})
+    try:  # on its own, so a problem with the link can't stop the rest
+        sheet.batch_update({"requests": [jump]})
+    except gspread.exceptions.APIError as error:
+        print(f"{view.title}: the B1 link was not set: {error}")
     parts = [f"{len(new_months)} new month(s)" if new_months else "",
              f"{len(new_products)} new product(s)" if new_products else "",
              f"updated {', '.join(sorted(refresh, key=label_month, reverse=True))}"]
