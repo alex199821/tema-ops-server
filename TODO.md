@@ -32,8 +32,9 @@ and a weekly report finds deeper patterns. Code finds the changes; the AI only w
   - 👍/👎 per line to tune the thresholds (and to measure how useful it is)
   - a bot-started message needs a Meta-approved utility template. This replaces the planned
     fixed daily report with a "Show report" button.
-- [ ] **Google Sheets**: the daily tables in one sheet she can open and filter on her phone,
-  replacing the Excel files.
+- [ ] **Google Sheets**: the store sales tab is live and updated every night (`incopos/sales_sheet.py`).
+  Next: a tab for each other branch once its IncoPOS key arrives (one `SALES_SHEET_TAB_<id>` line
+  each), the costs still missing in `თვითღირებულებები`, and the profit for the bot to read.
 - [ ] **TikTok videos.** Tema doesn't advertise, but influencers post about it. No clean API
   (TikTok's research API is for academics only; scraping breaks TikTok's terms), so: whoever sees
   a video forwards the link to the bot, and it is saved as an event (the post time comes from

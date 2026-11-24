@@ -50,7 +50,7 @@ gcloud compute ssh tema-ops-server --zone=europe-west3-a --project=tema-ops-prod
 
 | When | What | Script | Log |
 |---|---|---|---|
-| Every day 01:00 | Fetch yesterday's IncoPOS store sales for every location → DB | `incopos/daily_update.py` | `logs/incopos_daily.log` |
+| Every day 01:00 | Fetch yesterday's IncoPOS store sales for every location → DB, then rewrite the sales tabs in the Google Sheet | `incopos/daily_update.py` | `logs/incopos_daily.log` |
 | Every day 12:00 | Fetch yesterday's Wolt orders for all branches → DB | `wolt/daily_update.py` | `logs/daily_update.log` |
 | Every 4 h (+ random 0–60 min) | Renew the Wolt token so the chain stays alive | `wolt/wolt_login.py` | `logs/token.log` |
 | Every day 12:30 | Back up the whole database to Cloud Storage (see "Backups") | `scripts/backup_db.sh` | `logs/backup_db.log` |
@@ -354,8 +354,18 @@ journalctl -u cron --since today | grep run_job             # proof cron started
 
 A good Wolt daily run ends with 3 `loaded <venue_id> <date>` lines (one per branch), then `DONE`.
 A good IncoPOS daily run has `Downloading <location> <date>` and `N sales` for each location,
-then `loaded data/incopos/<location id>/<date>.json: N receipts`, `Done: …`, `DONE`. There are
-fewer receipts than sales: the API repeats some receipts, and each is stored once.
+then `loaded data/incopos/<location id>/<date>.json: N receipts`, `Done: …`, a line per branch tab
+of the Google Sheet (`<tab>: N rows, N months: …`), and `DONE`. There are fewer receipts than
+sales: the API repeats some receipts, and each is stored once.
+
+The Google Sheet (`SALES_SHEET_ID` in `.env`, one tab per branch named in `SALES_SHEET_TAB_<IncoPOS
+location id>`) is written by `incopos/sales_sheet.py` as the robot (`tema-ops-vm`, Editor on the
+sheet). It reads costs from the sheet's `თვითღირებულებები` tab, which people keep. To rewrite the
+tabs by hand, without fetching anything:
+
+```bash
+cd ~/tema-ops-server && uv run python src/tema_ops/incopos/sales_sheet.py
+```
 
 Test the alert email (fails on purpose, no Wolt involved):
 
