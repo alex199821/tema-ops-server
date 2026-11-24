@@ -1,5 +1,5 @@
 """Downloads yesterday's IncoPOS sales (every location), loads them into the database,
-then rewrites the sales tabs of the Google Sheet with the new data.
+then brings the sales tabs of the Google Sheet up to date.
 Runs on the server every night at 01:00 (cron), one hour after the day has ended.
 
 Usage:
@@ -16,8 +16,8 @@ def daily_update(day):
     subprocess.run([sys.executable, "src/tema_ops/incopos/fetch_incopos.py", "--from", day], check=True)
     # 2. Load those files into the database (safe to repeat: receipts are replaced, not doubled)
     subprocess.run([sys.executable, "src/tema_ops/incopos/load_incopos.py", "--from", day], check=True)
-    # 3. Rewrite each branch's tab in the Google Sheet from the database
-    subprocess.run([sys.executable, "src/tema_ops/incopos/sales_sheet.py"], check=True)
+    # 3. Bring each branch's tab in the Google Sheet up to date (the newest month, and this day's month)
+    subprocess.run([sys.executable, "src/tema_ops/incopos/sales_sheet.py", "--day", day], check=True)
 
 
 if __name__ == "__main__":
