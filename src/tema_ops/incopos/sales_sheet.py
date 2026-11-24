@@ -1,14 +1,15 @@
 """Keeps each branch's tab of the Google Sheet up to date with the IncoPOS sales, in Nino's Sheet7
-layout, with the months side by side: the newest month first, older months to the right.
+layout, with the months side by side in order: the oldest on the left, the newest on the right.
+B1 is a link that jumps to the newest month, so nobody has to scroll there.
 
 - Rows: every product the branch has sold, in sections by IncoPOS group (ყავა, მზა პროდუქცია…),
   each section followed by its ნავაჭრი (yellow) and მოგება (green) rows; the totals at the bottom.
 - Columns: B = product, then one section per month:
   თვითღირებულება | გაყიდვის ფასი | მოგება | days 1-15 | გაყიდული შემოსავალი მოგება |
-  days 16-31 | გაყიდული შემოსავალი მოგება. The newest month's columns are Nino's C..AS.
+  days 16-31 | გაყიდული შემოსავალი მოგება. The oldest month's columns are Nino's C..AS.
 
 It never clears the tab (except the very first time); it only adds and updates:
-- a new month: a new section is INSERTED on the left; older months move right, untouched
+- a new month: a new section is ADDED on the right; the older months stay untouched
 - a new product: a row is INSERTED in its section
 - every night: the newest month's IncoPOS cells are written again: the price (each product's first
   receipt of the month, IncoPOS's price without VAT), how many were sold per day, and the cost from
@@ -51,6 +52,7 @@ SEPARATOR = {"red": 0.4, "green": 0.4, "blue": 0.4}      # the column between mo
 YELLOW = {"red": 1, "green": 0.8, "blue": 0}             # ნავაჭრი rows (colours from Nino's file)
 GREEN = {"red": 0, "green": 1, "blue": 0}                # მოგება rows
 DARK_GREEN = {"red": 0.2, "green": 0.6, "blue": 0.4}     # the totals at the bottom
+BLUE = {"red": 0.07, "green": 0.33, "blue": 0.8}         # the link to the newest month
 FILL = {"money": YELLOW, "profit": GREEN, "total_money": DARK_GREEN, "total_profit": DARK_GREEN}
 
 # A day is like the cash book: 21:00 the evening before -> 21:00 (night + day shift).
@@ -103,6 +105,7 @@ GROUP BY 1, 2
 """
 
 NOTES = {
+    "jump": "დააჭირეთ: გადადის ბოლო თვეზე. ყოველ ღამე თავისით ახლდება.",
     "product": "დღე = წინა დღის 21:00-დან ამ დღის 21:00-მდე (ღამის და დღის ცვლა), როგორც სალაროს წიგნში.\n"
                "ყოველ ღამე რობოტი ახლებს მხოლოდ ბოლო თვის IncoPOS-ის უჯრებს (ფასი, გაყიდული დღეებში, "
                "თვითღირებულება). გასული თვეები არ იცვლება: იქ შეგიძლიათ ხელით შეცვალოთ.",
@@ -226,10 +229,11 @@ class Tab:
                                      "inheritFromBefore": True}}]
 
     def add_month(self, label: str, sheet_id: int) -> list:
-        """Inserts a month's section in its place: before the first older month, or at the end."""
+        """Adds a month's section in its place: at the end, or before the first newer month
+        (only when an older month is loaded later)."""
         month = label_month(label)
-        older = [first for other, first in self.months.items() if label_month(other) < month]
-        at = min(older) if older else self.columns + 1
+        newer = [first for other, first in self.months.items() if label_month(other) > month]
+        at = min(newer) if newer else self.columns + 1
         if at <= self.columns:
             request = {"insertDimension": {"range": {"sheetId": sheet_id, "dimension": "COLUMNS",
                                                      "startIndex": at - 1, "endIndex": at - 1 + STEP},
@@ -392,8 +396,13 @@ def update_branch(sheet, conn, location_id: int, view, costs: dict, day: datetim
         if label in new_months or new_products:  # the yellow/green rows' ranges cover the new rows
             cells.update(summary_formulas(tab, col))
 
-    # 5. The IncoPOS cells: new months, the newest month, and the month(s) of --day
+    # 5. B1: a link that jumps to the newest month (its title cell)
     newest_label = month_label(months[-1])
+    cells[1, 2] = f'=HYPERLINK("#gid={view.id}&range={column(tab.months[newest_label])}1","→ {newest_label}")'
+    formats += [_style(view.id, 1, 2, 1, 2, {"textFormat": {"bold": True, "fontSize": 12, "foregroundColor": BLUE}}),
+                _note(view.id, 1, 2, NOTES["jump"])]
+
+    # 6. The IncoPOS cells: new months, the newest month, and the month(s) of --day
     refresh = set(new_months) | {newest_label}
     if day:
         refresh |= {month_label(d.replace(day=1)) for d in (day, day + datetime.timedelta(days=1))} & set(tab.months)
