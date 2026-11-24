@@ -38,6 +38,7 @@ from gspread.utils import rowcol_to_a1
 COSTS_TAB = "თვითღირებულებები"           # A = product, B = cost; people keep it, the robot only reads it
 MONTHS = ["იანვარი", "თებერვალი", "მარტი", "აპრილი", "მაისი", "ივნისი", "ივლისი",
           "აგვისტო", "სექტემბერი", "ოქტომბერი", "ნოემბერი", "დეკემბერი"]
+WEEKDAYS = ["ორშ", "სამშ", "ოთხ", "ხუთ", "პარ", "შაბ", "კვირა"]  # Monday first, like date.weekday()
 NO_GROUP = "სხვა"                        # section for a product that has no group in IncoPOS
 HEAD = 2      # row 1 = month titles, row 2 = headings
 SECTION = 43  # columns per month (Nino's C..AS)
@@ -289,10 +290,24 @@ def month_values(tab: Tab, col: Columns, prices: dict, sold: list, costs: dict |
     return cells
 
 
+def day_headings(label: str, col: Columns) -> dict:
+    """Each day's heading: the date and the weekday on two lines ("01.11" / "კვირა"); empty after the month ends."""
+    month = label_month(label)
+    cells = {}
+    for d, c in col.day.items():
+        try:
+            day = month.replace(day=d)
+        except ValueError:  # e.g. 31 November
+            cells[HEAD, c] = ""
+            continue
+        cells[HEAD, c] = f"{day:%d.%m}\n{WEEKDAYS[day.weekday()]}"
+    return cells
+
+
 def month_head(label: str, col: Columns) -> dict:
     cells = {(1, col.first): label, (HEAD, col.cost): "თვითღირებულება", (HEAD, col.price): "გაყიდვის ფასი",
              (HEAD, col.unit): "მოგება"}
-    cells.update({(HEAD, c): d for d, c in col.day.items()})
+    cells.update(day_headings(label, col))
     for *_, c_sold, c_money, c_profit in col.blocks:
         cells.update({(HEAD, c_sold): "გაყიდული", (HEAD, c_money): "შემოსავალი", (HEAD, c_profit): "მოგება"})
     return cells
@@ -320,7 +335,7 @@ def month_formats(tab: Tab, col: Columns, sheet_id: int) -> list:
     widths = {col.cost: 110, col.price: 100, col.unit: 70, col.separator: 16, **{c: 12 for c in col.gaps}}
     for *_, c_sold, c_money, c_profit in col.blocks:
         widths.update({c_sold: 75, c_money: 90, c_profit: 90})
-    out += [_width(sheet_id, c, widths.get(c, 38)) for c in range(col.first, col.separator + 1)]
+    out += [_width(sheet_id, c, widths.get(c, 46)) for c in range(col.first, col.separator + 1)]
     return out
 
 
@@ -394,6 +409,14 @@ def update_branch(sheet, conn, location_id: int, view, costs: dict, day: datetim
                                           {"backgroundColor": FILL[kind], **BOLD, **MONEY}))
         if label in new_months or new_products:  # the yellow/green rows' ranges cover the new rows
             cells.update(summary_formulas(tab, col))
+        # Every month's day headings (date + weekday), written every night: labels only, no numbers
+        cells.update(day_headings(label, col))
+        formats.append(_style(view.id, HEAD, col.day[1], HEAD, col.day[31],
+                              {"wrapStrategy": "WRAP", "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}))
+        formats += [_width(view.id, c, 46) for c in col.day.values()]
+    formats.append({"updateDimensionProperties": {  # room for the two lines of the day headings
+        "range": {"sheetId": view.id, "dimension": "ROWS", "startIndex": HEAD - 1, "endIndex": HEAD},
+        "properties": {"pixelSize": 40}, "fields": "pixelSize"}})
 
     # 5. B1: a link that jumps to the newest month (its title cell). A plain Sheets link, the kind
     #    Insert -> Link makes: a click shows the link box (a =HYPERLINK formula showed none here).
