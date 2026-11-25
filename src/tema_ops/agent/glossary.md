@@ -30,3 +30,6 @@ Table `branches (id, name)`. Every department links its data to a branch.
 - If a product or branch name matches more than one thing,
   ask which one is meant. Do not guess.
 - Always say which period and which branches an answer covers.
+- "Sandwiches" (სენდვიჩები) = all handheld food: sandwiches, burgers, rolls, pitas, toasts,
+  wraps and lavash. Not salads, fries, sauces or drinks. Each department's product list
+  below marks which of its products these are.

@@ -63,8 +63,8 @@ Useful fields inside `wolt.orders.raw`:
 - For branch questions, join `wolt.orders` → `wolt.venues` → `branches`.
 
 ## Products (Wolt names)
-- Rolls & pitas: ქათმის როლი, სოკოს როლი სამარხვო, პიტა ცეზარი, ლეგო პიტა ცეზარი
-- Sandwiches: ქათმის სენდვიჩი, ქათმის სენდვიჩი ორმაგი შიგთავსით,
+- Sandwiches (rolls, pitas, sandwiches and burgers: all of these count as "sandwiches"):
+  ქათმის როლი, სოკოს როლი სამარხვო, პიტა ცეზარი, ლეგო პიტა ცეზარი, ქათმის სენდვიჩი, ქათმის სენდვიჩი ორმაგი შიგთავსით,
   ლორის და ყველის სენდვიჩი, ლორის და ყველის სენდვიჩი ორმაგი შიგთავსით,
   წითელი ქაშაყის სენდვიჩი, ბურგერი
 - Salads: ცეზარი, ბერძნული, ტუნას სალათი
