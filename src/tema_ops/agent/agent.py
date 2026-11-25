@@ -1,7 +1,9 @@
+import os
 from pathlib import Path
 
+import psycopg
 from langchain.agents import create_agent
-from langchain.agents.middleware import ModelFallbackMiddleware, wrap_model_call
+from langchain.agents.middleware import ModelFallbackMiddleware, dynamic_prompt, wrap_model_call
 from langgraph.checkpoint.memory import InMemorySaver
 
 from tema_ops.agent.model import get_model
@@ -39,6 +41,27 @@ def keep_last_questions(request, handler):
     return handler(request.override(messages=what_ai_reads(request.messages)))
 
 
+TODAY_SQL = """SELECT CURRENT_DATE, TO_CHAR(CURRENT_DATE, 'FMDay'),
+                      (SELECT MAX(received_at::date) FROM wolt.orders),
+                      (SELECT MAX(paid_at::date) FROM incopos.sales)"""
+
+
+def today_facts():
+    # Asks the database, so "today" is exactly what CURRENT_DATE means in the AI's own queries
+    with psycopg.connect(os.environ["AI_DATABASE_URL"]) as conn:
+        today, weekday, wolt, incopos = conn.execute(TODAY_SQL).fetchone()
+    return (f"Today is {weekday}, {today}. Newest day in the database: Wolt {wolt}, "
+            f"IncoPOS {incopos}. Later days are not loaded yet. "
+            "Use these dates instead of querying for them.")
+
+
+@dynamic_prompt
+def add_today(request):
+    # Runs before every Gemini call. The facts go at the end, so the long part of the prompt
+    # that never changes stays identical and Gemini can keep reading it from its cache.
+    return request.system_prompt + "\n\n" + today_facts()
+
+
 def load_glossaries():
     # Every department folder has a glossary.md. agent/ comes first (company-wide rules).
     files = sorted(SRC.glob("*/glossary.md"))
@@ -53,11 +76,14 @@ def build_agent(channel_rules="", remember=True):
     #   this: it saves every answer to the database right after sending it, and hands the
     #   agent the earlier questions and answers itself (app.py, think).
     parts = [INSTRUCTIONS, channel_rules, load_glossaries()]
+    # Main model: standard, max 30 s per answer (the longest normal one took ~20 s).
+    # Backup if it fails twice: priority, max 60 s. A test run on priority alone was not faster.
+    backup = ModelFallbackMiddleware(get_model(priority=True, timeout=60))
     return create_agent(
-        get_model(),
+        get_model(timeout=30),
         tools=[run_sql, get_wolt_report],
         system_prompt="\n\n".join(part for part in parts if part),
-        middleware=[keep_last_questions, ModelFallbackMiddleware(get_model(priority=True))],
+        middleware=[keep_last_questions, add_today, backup],
         checkpointer=InMemorySaver() if remember else None,
     )
 

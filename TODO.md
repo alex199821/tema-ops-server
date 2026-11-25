@@ -59,9 +59,11 @@ and a weekly report finds deeper patterns. Code finds the changes; the AI only w
   day, an 08:59 order belongs to the previous night, half-loaded nights are empty), the
   WhatsApp webhook (unknown numbers ignored, duplicate messages answered once, voice
   messages routed to transcription), report building.
-- [ ] **Eval set for the AI.** About 15 real owner questions with hand-checked answers, saved as
-  a LangSmith dataset, run on every prompt/model change. Needed before changing the model,
-  the thinking level, or anything else that affects answers.
+- [ ] **Eval set for the AI.** Started 2026-11-25: LangSmith dataset `tema-ops-eval` (15 real owner
+  questions, no answers yet) and `evals/run_evals.py` (`uv run python evals/run_evals.py <name>`,
+  needs the DB tunnel; times every answer, prints the average). Still to do: hand-checked answers
+  (start with the fixed-date questions #4, #5, #12), a Gemini-call count per question in the script,
+  and running it in CI. Needed before changing the model or the thinking level.
 - [ ] **No live write access from the Mac.** Point the Mac's `DATABASE_URL` back to the local
   database; only `AI_DATABASE_URL` (read-only) goes through the tunnel.
 
@@ -88,11 +90,19 @@ and a weekly report finds deeper patterns. Code finds the changes; the AI only w
 
 ## AI agent
 
-- [ ] **Faster answers.** Measured 2026-11-20 (LangSmith, 18 answers): ~100% of the time is
-  Gemini calls, SQL ~0%. Worst cases are single calls hanging 24–94 s at Google. Fix first:
-  a ~20 s timeout on the normal model so the existing priority fallback takes over. Then:
-  glossary examples for common questions (fewer SQL rounds; avg 3.2, max 9 AI calls per
-  answer), and a lower thinking level (needs the eval set first).
+- [ ] **Faster answers.** Measured 2026-11-25 with the eval set: ~100% of the time is Gemini calls.
+  Baseline 6.5 Gemini calls per question, median ~48 s, single calls hanging 1–5 min at Google
+  (standard and priority alike; priority as the main model was no faster).
+  - Done, NOT committed yet: 1a, today's date + newest Wolt/IncoPOS day at the end of the prompt
+    (agent.py `add_today`, glossary rule fixed) → 5.6 calls/question; timeout fix (model.py,
+    agent.py): 30 s + 1 re-send, then the priority backup with 60 s → worst question 274–559 s → 97–169 s.
+  - Next: 1b `incopos/glossary.md` (1a mentions IncoPOS, so table-list lookups tripled: 3–4 → 11–12
+    per run). Needs: what "დოზა ყავა" means, what location "ახალი კაფე" is. Stopgap: drop IncoPOS
+    from the prompt line.
+  - Then 1c, instructions: no `information_schema` / sample rows, fewest queries, independent queries
+    in one step, max ~5 queries for open-ended analysis.
+  - Then voice: a timeout + minimal thinking (`voice.py`). Then a lower thinking level for the agent
+    (after hand-checked answers). Maybe: run the eval once on the server (hangs are rarer there).
 - [ ] Result checker (Reflection): a second look at the SQL and the answer before replying.
 
 ## Product

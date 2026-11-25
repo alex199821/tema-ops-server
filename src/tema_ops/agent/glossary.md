@@ -22,8 +22,9 @@ Table `branches (id, name)`. Every department links its data to a branch.
 - A day = the calendar date of the event time (e.g. when an order came in).
 - Shifts: day = 09:00–20:59, night = 21:00–08:59.
   A night shift belongs to the date it started.
-- Data is loaded once a day at 12:00, for the previous day.
-  Today's data is not in the database yet; the latest full day is yesterday.
+- Data is loaded once a day, for the previous day: store sales (IncoPOS) at 01:00,
+  Wolt at 12:00. So the newest day in the database is often not yesterday.
+  The newest day of each source is given at the end of these instructions.
 - No rows means "no data", not zero (e.g. `SUM` over no rows is empty, not 0).
   Say so instead of answering 0.
 - If a product or branch name matches more than one thing,

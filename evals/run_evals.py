@@ -1,3 +1,5 @@
+import sys
+
 from langsmith import evaluate
 
 from tema_ops.whatsapp.app import agent  # the same agent the WhatsApp bot uses
@@ -13,7 +15,8 @@ if __name__ == "__main__":
     results = evaluate(
         ask,                          # the function above
         data="tema-ops-eval",         # the 15 questions in LangSmith
-        experiment_prefix="baseline", # name of this run in LangSmith: "baseline-…"
+        # name of this run in LangSmith, e.g. "fix-1a-…" (from the command line; default "baseline")
+        experiment_prefix=sys.argv[1] if len(sys.argv) > 1 else "baseline",
         max_concurrency=0,            # one question at a time, like a real person
     )
 
