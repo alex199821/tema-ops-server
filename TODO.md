@@ -93,14 +93,14 @@ and a weekly report finds deeper patterns. Code finds the changes; the AI only w
 - [ ] **Faster answers.** Measured 2026-11-25 with the eval set: ~100% of the time is Gemini calls.
   Baseline 6.5 Gemini calls per question, median ~48 s, single calls hanging 1–5 min at Google
   (standard and priority alike; priority as the main model was no faster).
-  - Done, NOT committed yet: 1a, today's date + newest Wolt/IncoPOS day at the end of the prompt
+  - Done: 1a, today's date + newest Wolt/IncoPOS day at the end of the prompt
     (agent.py `add_today`, glossary rule fixed) → 5.6 calls/question; timeout fix (model.py,
     agent.py): 30 s + 1 re-send, then the priority backup with 60 s → worst question 274–559 s → 97–169 s.
-  - Next: 1b `incopos/glossary.md` (1a mentions IncoPOS, so table-list lookups tripled: 3–4 → 11–12
-    per run). Needs: what "დოზა ყავა" means, what location "ახალი კაფე" is. Stopgap: drop IncoPOS
-    from the prompt line.
-  - Then 1c, instructions: no `information_schema` / sample rows, fewest queries, independent queries
-    in one step, max ~5 queries for open-ended analysis.
+  - Done: 1b, `incopos/glossary.md` → 4.4–5.3 calls/question (was 5.6–6.3), table-list lookups
+    9–11 → 0 per run, median 28–44 s (was 48–60 s). Weak spots seen in the answers: `evals/what_to_watch.md`.
+  - Next: 1c, instructions: no `information_schema` / sample rows, no name lookups for products the
+    glossaries list, fewest queries, independent queries in one step, max ~5 queries for open-ended
+    analysis. (Slowest now: #7, #8, #14, one query per Gemini step: #8 ran 9 queries in 9 steps.)
   - Then voice: a timeout + minimal thinking (`voice.py`). Then a lower thinking level for the agent
     (after hand-checked answers). Maybe: run the eval once on the server (hangs are rarer there).
 - [ ] Result checker (Reflection): a second look at the SQL and the answer before replying.
