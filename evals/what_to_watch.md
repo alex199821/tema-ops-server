@@ -15,6 +15,28 @@ Remove an item when it's fixed. Question numbers are the `n` in the `tema-ops-ev
   Lisi was "stable" in one run and "slightly falling" in the other, and Sanapiro "volatile" vs "growing".
   This happened before 1b too. Fix idea: a fixed method in the glossary (e.g. compare the last 4 full
   weeks with the 4 before them, and give the % change).
+- [ ] **The agent added up a long list itself and got it wrong** (#8, 1c run `fix-1c-query-rules-eac1e04e`).
+  It summed ~23 store product rows in its head: 46,322 GEL instead of 46,612.50 (290 GEL off).
+  Its own daily query in the same answer adds up to 46,612.50. Adding 2 numbers was right every time
+  (#2, #7). 1c was reverted (2026-11-26), so the agent is back to the pre-1c behaviour, which got #8's
+  totals right in both 1b runs. If hand-adding shows up again, the ideas tried during 1c: INSTRUCTIONS
+  "let the query do the adding" (with the reason, 2–3 numbers by hand are fine) and a total row in
+  glossary example 1 (both were right in their runs). A strict "never add up rows yourself" also forbids
+  Wolt + store = total.
+- [ ] **Store "როლი" counted as chicken roll** (#7, 1c run `fix-1c-query-rules-eac1e04e`). The answer
+  added store როლი (1,325) to Wolt ქათმის როლი (883) = 2,208 chicken rolls. Probably right (the store
+  also has სოკოს როლი), but nobody confirmed it. If it's right, say so in `incopos/glossary.md`.
+- [ ] **#11's very first Gemini call keeps hanging** ("how would you say overall multiple month dynamic
+  of sanapiro?"). In the last 4 runs (25 Nov 18:32–19:45 UTC), its first call returned nothing within
+  30 s, twice in a row (504), every time; it failed the whole question in 2 of those runs. Earlier it took
+  3–7 s. The other questions' first calls in the same runs were fine. They're hangs, not long thinking:
+  without the timeout the same call once took 285 s for 143 tokens. Unknown why; check whether it also
+  happens on the server after the deploy.
+- [ ] **The glossaries' product lists are written by hand and can go stale.** Today the store list
+  matches all 103 sold products. A new or renamed product, or the other 4 branches' IncoPOS data, makes
+  it incomplete, and the agent trusts the lists. (Under 1c, which said "the glossaries are complete",
+  name checks fell from ~3 per run to ~0.8; 1c is reverted, so they're back.) Fix idea: a pytest that
+  fails when a sold product (store or Wolt) is missing from the glossary lists.
 - [ ] **"No store data for დოლაბაური"** (#2, #4, #12) is true only while ახალი კაფე isn't linked to a
   branch. If ახალი კაფე turns out to be Wolt's დოლაბაური, set `incopos.locations.branch_id`
   and update the location table in `incopos/glossary.md`.

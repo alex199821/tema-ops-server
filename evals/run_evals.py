@@ -1,3 +1,10 @@
+"""Asks the eval questions one by one to the WhatsApp agent and times every answer.
+
+Usage: uv run python evals/run_evals.py <run name> [dataset]
+  dataset: tema-ops-eval-fixed (default: fixed dates, right answers in evals/facts.py)
+           or tema-ops-eval (the owner's original wording, with "yesterday" etc.)
+Afterwards: uv run python evals/check_run.py <run name> compares the answers with the facts.
+"""
 import sys
 
 from langsmith import evaluate
@@ -14,7 +21,7 @@ def ask(inputs):
 if __name__ == "__main__":
     results = evaluate(
         ask,                          # the function above
-        data="tema-ops-eval",         # the 15 questions in LangSmith
+        data=sys.argv[2] if len(sys.argv) > 2 else "tema-ops-eval-fixed",  # the 15 questions in LangSmith
         # name of this run in LangSmith, e.g. "fix-1a-…" (from the command line; default "baseline")
         experiment_prefix=sys.argv[1] if len(sys.argv) > 1 else "baseline",
         max_concurrency=0,            # one question at a time, like a real person

@@ -59,11 +59,16 @@ and a weekly report finds deeper patterns. Code finds the changes; the AI only w
   day, an 08:59 order belongs to the previous night, half-loaded nights are empty), the
   WhatsApp webhook (unknown numbers ignored, duplicate messages answered once, voice
   messages routed to transcription), report building.
-- [ ] **Eval set for the AI.** Started 2026-11-25: LangSmith dataset `tema-ops-eval` (15 real owner
-  questions, no answers yet) and `evals/run_evals.py` (`uv run python evals/run_evals.py <name>`,
-  needs the DB tunnel; times every answer, prints the average). Still to do: hand-checked answers
-  (start with the fixed-date questions #4, #5, #12), a Gemini-call count per question in the script,
-  and running it in CI. Needed before changing the model or the thinking level.
+- [ ] **Eval set for the AI.** LangSmith datasets `tema-ops-eval` (15 real owner questions) and
+  `tema-ops-eval-fixed` (the same with fixed dates, the default). `evals/run_evals.py <name> [dataset]`
+  times every answer (needs the DB tunnel); `evals/facts.py` computes the right numbers (read-only SQL,
+  saved to the git-ignored `data/`); `evals/check_run.py <run> [<run> ...]` scores answers against them.
+  - **More detailed checks of the facts by hand.** Done so far against the Wolt portal: ლისი 11–24 Nov
+    (totals, orders, rejected, chicken rolls) and #8's Wolt sandwiches per product in all 3 branches:
+    exact matches. (The portal's Items tab also counts items of rejected orders; we don't.)
+    Still to check: the store numbers against IncoPOS's own report (#2, #4, #5, #8's store half),
+    ratings (#14, #15), and the definitions in #10, #12, #13 with Nino.
+  - Still to do: more questions (only 15 today, a few per kind), and running it in CI.
 - [ ] **No live write access from the Mac.** Point the Mac's `DATABASE_URL` back to the local
   database; only `AI_DATABASE_URL` (read-only) goes through the tunnel.
 
@@ -98,11 +103,19 @@ and a weekly report finds deeper patterns. Code finds the changes; the AI only w
     agent.py): 30 s + 1 re-send, then the priority backup with 60 s → worst question 274–559 s → 97–169 s.
   - Done: 1b, `incopos/glossary.md` → 4.4–5.3 calls/question (was 5.6–6.3), table-list lookups
     9–11 → 0 per run, median 28–44 s (was 48–60 s). Weak spots seen in the answers: `evals/what_to_watch.md`.
-  - Next: 1c, instructions: no `information_schema` / sample rows, no name lookups for products the
-    glossaries list, fewest queries, independent queries in one step, max ~5 queries for open-ended
-    analysis. (Slowest now: #7, #8, #14, one query per Gemini step: #8 ran 9 queries in 9 steps.)
-  - Then voice: a timeout + minimal thinking (`voice.py`). Then a lower thinking level for the agent
-    (after hand-checked answers). Maybe: run the eval once on the server (hangs are rarer there).
+  - Tried and reverted (2026-11-26): 1c, query rules in `INSTRUCTIONS` (no schema/name lookups, fewest
+    queries, let the query do the adding, independent queries in one step) → ~4 calls/question, typical
+    answer only ~3 s faster, #7/#8/#12 10–26 s faster. Reverted to keep the risk low: bigger, harder-to-check
+    SQL, one hand-added wrong total (#8), and "the glossaries are complete" stops being true when products
+    or branches change. Gemini ran 2 queries in one step only once in ~50 steps.
+  - **Honest result over all the runs:** the typical answer went only from ~37.5 s to ~34 s (Google hangs
+    taken out). Calls fell, but each call writes more, and a call costs ~3.5 s fixed + ~0.6 s per 100
+    written tokens, about half of them thinking (the final answer alone: ~11.5 s, ~740 thinking tokens).
+    The longer prompt cost ~nothing. The real win is the worst cases (timeout): worst question
+    274–559 s → 67–185 s; the price is a rare failed question when both Google models time out.
+  - Next, the only noticeable lever left: a lower thinking level, after hand-checked answers for #4, #5, #12.
+    Voice: a timeout + minimal thinking (`voice.py`). A backup on another provider for Google bursts.
+    Maybe: run the eval once on the server (hangs are rarer there).
 - [ ] Result checker (Reflection): a second look at the SQL and the answer before replying.
 
 ## Product
