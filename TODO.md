@@ -8,13 +8,23 @@ The CEO uses the reports to know what is happening in the branches (e.g. "burger
 down at one branch: is it only there, or everywhere?"). Goal: the bot tells her every day,
 and a weekly report finds deeper patterns. Code finds the changes; the AI only writes them up.
 
-- [ ] **IncoPOS for the other 4 branches.** Ask the vendor for an app ID + secret per branch (or
-  one key for all locations), and how far back their cloud has each branch. Test one old day
-  per branch, then download the whole history on the server in the background (~40 s per
-  day: about 2–3 days for 2 years × 4 branches), and map each IncoPOS location to its branch.
-  The daily job (`incopos/daily_update.py`, 01:00) already fetches every location the key can
-  see; if each branch gets its own key, the scripts need a list of keys instead of one.
-  (Location "ახალი კაფე" opened 2026-09-03; that's why the API has nothing for it before that date.)
+- [ ] **IncoPOS for the other 4 branches** (in progress). Keys for სანაპირო, ლისი, ივერთუბანი are
+  in the Mac `.env`; დოლაბაური's is still missing. Each key is a separate IncoCloud account that
+  counts shops, receipts and products from 1, so the numbers clash. Decided: a `branch_id`
+  column on every IncoPOS row and one data folder per branch (option A). Then a download on
+  the server: one worker per branch, 3 days at a time, newest first, wait 15 min after an error
+  (the API allows max 30 days per request and blocks the IP ~10 min after too many requests).
+  First receipts: ლისი 2024-08-25, სანაპირო 2025-03-13, ივერთუბანი 2026-11-02, ახალი კაფე
+  2026-09-03. Ask the vendor / CEO where the older years are (expected 7–8 years for one branch).
+- [ ] **URGENT, right after the branches are loaded: one product list for all branches.** A
+  mapping table (branch, IncoPOS product number) → one shared product (e.g. სანაპირო 6 = ლისი 59
+  = ბურგერი): matched by name automatically, checked by a person. Without it "is it down
+  everywhere?" only works by fragile name matching.
+- [ ] **URGENT, right after the branches are loaded: clean summary tables** that the bot and the
+  Sheets read instead of the raw receipts, e.g. one row per day × branch × product with
+  quantity, revenue and cost. Simple, documented tables make the AI's queries far more
+  accurate. Plus checks after every load (totals vs IncoPOS's own report, no duplicate
+  receipts, no missing days).
 - [ ] **Company context for the agents**, in the DB (not in git: the repo is public):
   - branch facts: name in each system (Wolt, IncoPOS, shift SMS), opening date, coordinates,
     kind of place, which branches are close and share customers
