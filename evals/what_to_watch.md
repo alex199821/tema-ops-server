@@ -18,11 +18,10 @@ Remove an item when it's fixed. Question numbers are the `n` in the `tema-ops-ev
 - [ ] **The agent added up a long list itself and got it wrong** (#8, 1c run `fix-1c-query-rules-eac1e04e`).
   It summed ~23 store product rows in its head: 46,322 GEL instead of 46,612.50 (290 GEL off).
   Its own daily query in the same answer adds up to 46,612.50. Adding 2 numbers was right every time
-  (#2, #7). 1c was reverted (2026-11-26), so the agent is back to the pre-1c behaviour, which got #8's
-  totals right in both 1b runs. If hand-adding shows up again, the ideas tried during 1c: INSTRUCTIONS
-  "let the query do the adding" (with the reason, 2–3 numbers by hand are fine) and a total row in
-  glossary example 1 (both were right in their runs). A strict "never add up rows yourself" also forbids
-  Wolt + store = total.
+  (#2, #7). It happened again without 1c (`fixed-3.8`: 28,661 instead of 29,051.00), so it's the model,
+  not 1c: 2 wrong out of 7 Flash runs. Trying now (2026-11-26): one sentence in INSTRUCTIONS, "get a total
+  of many rows from the query (SUM or ROLLUP), never by adding rows yourself; two or three numbers are fine".
+  If #8 still goes wrong, the sturdier fix: `run_sql` adds a sums line under long results (computed by code).
 - [ ] **Store "როლი" counted as chicken roll** (#7, 1c run `fix-1c-query-rules-eac1e04e`). The answer
   added store როლი (1,325) to Wolt ქათმის როლი (883) = 2,208 chicken rolls. Probably right (the store
   also has სოკოს როლი), but nobody confirmed it. If it's right, say so in `incopos/glossary.md`.

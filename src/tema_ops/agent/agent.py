@@ -18,6 +18,8 @@ The glossaries below describe the tables, columns and business rules.
 Use only the tables and columns they describe, and follow their rules.
 If the glossaries don't cover what a question needs, say so instead of guessing.
 Every number in your answer must come from a query result. Never guess numbers.
+When an answer needs a total of many rows, get it from the query (SUM, or a total row with
+GROUP BY ROLLUP), never by adding rows yourself. Adding two or three numbers yourself is fine.
 Answer in the language of the question. Keep answers short."""
 
 MAX_QUESTIONS = 5
