@@ -10,10 +10,11 @@ load_dotenv()
 # It connects as bot_writer, which may only add and read rows in that one table.
 
 def last_questions(phone, count):
-    # The person's last `count` questions with their answers, oldest first
+    # The person's last `count` questions: (when asked, question, answer), oldest first.
+    # asked_at is Tbilisi time (the server's clock runs on Asia/Tbilisi).
     with psycopg.connect(os.environ["BOT_DATABASE_URL"]) as conn:
         rows = conn.execute(
-            "SELECT question, answer FROM whatsapp.questions"
+            "SELECT asked_at, question, answer FROM whatsapp.questions"
             " WHERE phone = %s ORDER BY id DESC LIMIT %s",
             (phone, count),
         ).fetchall()

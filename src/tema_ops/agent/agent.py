@@ -43,16 +43,17 @@ def keep_last_questions(request, handler):
     return handler(request.override(messages=what_ai_reads(request.messages)))
 
 
-TODAY_SQL = """SELECT CURRENT_DATE, TO_CHAR(CURRENT_DATE, 'FMDay'),
+TODAY_SQL = """SELECT CURRENT_DATE, TO_CHAR(CURRENT_DATE, 'FMDay'), TO_CHAR(now(), 'HH24:MI'),
                       (SELECT MAX(received_at::date) FROM wolt.orders),
                       (SELECT MAX(paid_at::date) FROM incopos.sales)"""
 
 
 def today_facts():
-    # Asks the database, so "today" is exactly what CURRENT_DATE means in the AI's own queries
+    # Asks the database, so "today" is exactly what CURRENT_DATE means in the AI's own queries.
+    # The time lets the AI tell how old the earlier questions in the chat are ("[asked … 22:45]").
     with psycopg.connect(os.environ["AI_DATABASE_URL"]) as conn:
-        today, weekday, wolt, incopos = conn.execute(TODAY_SQL).fetchone()
-    return (f"Today is {weekday}, {today}. Newest day in the database: Wolt {wolt}, "
+        today, weekday, now, wolt, incopos = conn.execute(TODAY_SQL).fetchone()
+    return (f"Today is {weekday}, {today}, {now} Tbilisi time. Newest day in the database: Wolt {wolt}, "
             f"IncoPOS {incopos}. Later days are not loaded yet. "
             "Use these dates instead of querying for them.")
 

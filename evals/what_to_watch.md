@@ -36,6 +36,14 @@ Remove an item when it's fixed. Question numbers are the `n` in the `tema-ops-ev
   it incomplete, and the agent trusts the lists. (Under 1c, which said "the glossaries are complete",
   name checks fell from ~3 per run to ~0.8; 1c is reverted, so they're back.) Fix idea: a pytest that
   fails when a sold product (store or Wolt) is missing from the glossary lists.
+- [ ] **Old answers reused from the chat memory** (live WhatsApp, 25 Nov 23:32). "როგორი შეფასებები გვაქ
+  მიღებული ბოლო დღეებში?" was answered with zero queries, by translating an earlier "last 3 days (18–20 Nov)"
+  answer from a few days before; 21–24 Nov (4 one-star ratings, 21 Nov the worst day) were missed. Fix
+  (2026-11-26): each earlier question in the memory now carries "[asked Sat 21 Nov 2026, 22:45]". Watch
+  whether repeated questions are now answered with fresh queries.
+- [ ] **"What was the bad rating about?" skips ratings without a comment** (same chat): it named #495 (with a
+  comment) but not the three 1★ ratings with no comment (#321, #512, #374). Fix idea: say how many low
+  ratings had no comment at all.
 - [ ] **"No store data for დოლაბაური"** (#2, #4, #12) is true only while ახალი კაფე isn't linked to a
   branch. If ახალი კაფე turns out to be Wolt's დოლაბაური, set `incopos.locations.branch_id`
   and update the location table in `incopos/glossary.md`.

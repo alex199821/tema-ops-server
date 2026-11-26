@@ -123,12 +123,18 @@ def to_text(phone, items):
         heard.append(said)
     return texts, heard
 
+def asked_label(asked):
+    # "[asked Sat 21 Nov 2026, 22:45]": tells the AI how old an earlier answer is
+    return f"[asked {asked:%a} {asked.day} {asked:%b %Y}, {asked:%H:%M}]"
+
 def think(phone, question):
     # The AI gets the person's earlier questions and answers (from the database) and the
     # new question. MAX_QUESTIONS counts the new question too.
+    # Each earlier question carries the date and time it was asked. Without it, the AI once
+    # reused a 4-day-old "last 3 days" answer for a new "recent days" question, without querying.
     messages = []
-    for old_question, old_answer in last_questions(phone, MAX_QUESTIONS - 1):
-        messages.append({"role": "user", "content": old_question})
+    for asked, old_question, old_answer in last_questions(phone, MAX_QUESTIONS - 1):
+        messages.append({"role": "user", "content": f"{asked_label(asked)} {old_question}"})
         messages.append({"role": "assistant", "content": old_answer})
     messages.append({"role": "user", "content": question})
     result = agent.invoke({"messages": messages})

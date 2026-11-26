@@ -123,3 +123,26 @@ def test_normal_answer_is_sent_once_and_saved(meta, monkeypatch):
     assert sent_texts(calls) == ["the answer"]
     assert alerts == []
     assert len(saved) == 1
+
+
+def test_earlier_questions_carry_when_they_were_asked(monkeypatch):
+    # The AI must see how old an earlier answer is, so it doesn't reuse an out-of-date one
+    # (it once answered "recent days" with a 4-day-old "last 3 days" answer, without querying).
+    from langchain_core.messages import AIMessage
+
+    monkeypatch.setattr(app, "last_questions", lambda phone, count: [
+        (datetime(2026, 11, 21, 22, 45), "any ratings in the last 3 days?", "18–20 Nov: 32 ratings")])
+    seen = []
+
+    class FakeAgent:
+        def invoke(self, state):
+            seen.extend(state["messages"])
+            return {"messages": [AIMessage(content="fresh answer")]}
+
+    monkeypatch.setattr(app, "agent", FakeAgent())
+    reply, files = app.think(PHONE, "როგორი შეფასებები გვაქ ბოლო დღეებში?")
+
+    assert seen[0] == {"role": "user", "content": "[asked Sat 21 Nov 2026, 22:45] any ratings in the last 3 days?"}
+    assert seen[1] == {"role": "assistant", "content": "18–20 Nov: 32 ratings"}
+    assert seen[2] == {"role": "user", "content": "როგორი შეფასებები გვაქ ბოლო დღეებში?"}  # the new one: no label
+    assert (reply, files) == ("fresh answer", [])
