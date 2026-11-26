@@ -6,10 +6,13 @@ as location 2, and every branch's account has its own receipt numbers starting a
 The files go into the database once the tables know about branches.
 
 Runs on the server in the background (you can log out; it keeps going):
-  nohup ~/.local/bin/uv run python src/tema_ops/incopos/backfill.py >> logs/incopos_backfill.log 2>&1 &
+  nohup ~/.local/bin/uv run python src/tema_ops/incopos/backfill.py --gap 20 >> logs/incopos_backfill.log 2>&1 &
 Watch it:  tail -f logs/incopos_backfill.log
+--gap = seconds between two requests over all branches. IncoCloud blocked us after ~25 requests
+in ~3 minutes (with an 8 s gap), so 20 s (3 a minute) is the default.
 Safe to stop and start again: days that are already saved are skipped.
 """
+import argparse
 import datetime
 import json
 import os
@@ -33,7 +36,7 @@ BRANCHES = {
     "ivertubani": datetime.date(2026, 11, 2),
 }
 DAYS_AT_ONCE = 3          # per branch
-GAP_SECONDS = 8           # at least this long between two requests, over all branches
+gap_seconds = 20          # at least this long between two requests, over all branches (--gap)
 PAUSE_ON_ERROR = 15 * 60  # after a timeout or server error (a block waits as long as IncoCloud says)
 MAX_TRIES = 5             # per day, then skip it (a later run picks it up again)
 TIMEOUT = 300             # a busy day takes 40-90 s
@@ -64,13 +67,13 @@ def blocked_for(response: httpx.Response) -> float:
 
 
 def wait_turn() -> None:
-    """Waits while everyone is paused, then keeps requests GAP_SECONDS apart."""
+    """Waits while everyone is paused, then keeps requests gap_seconds apart."""
     global next_start
     while True:
         with lock:
             now = time.time()
             if now >= paused_until and now >= next_start:
-                next_start = now + GAP_SECONDS
+                next_start = now + gap_seconds
                 return
             wait = max(paused_until, next_start) - now
         time.sleep(min(wait, 30))
@@ -175,7 +178,11 @@ def run_branch(name: str, first_day: datetime.date, client: httpx.Client) -> Non
 
 
 def main():
-    log("Backfill started")
+    global gap_seconds
+    parser = argparse.ArgumentParser(description="Download the IncoPOS history of the branches with their own key.")
+    parser.add_argument("--gap", type=float, default=gap_seconds, help="Seconds between two requests (default 20)")
+    gap_seconds = parser.parse_args().gap
+    log(f"Backfill started (one request every {gap_seconds:g} s)")
     with httpx.Client(timeout=TIMEOUT) as client, ThreadPoolExecutor(len(BRANCHES)) as pool:
         jobs = [pool.submit(run_branch, name, first, client) for name, first in BRANCHES.items()]
         for job in jobs:
