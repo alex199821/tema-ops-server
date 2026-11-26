@@ -146,3 +146,43 @@ def test_earlier_questions_carry_when_they_were_asked(monkeypatch):
     assert seen[1] == {"role": "assistant", "content": "18–20 Nov: 32 ratings"}
     assert seen[2] == {"role": "user", "content": "როგორი შეფასებები გვაქ ბოლო დღეებში?"}  # the new one: no label
     assert (reply, files) == ("fresh answer", [])
+
+
+# The error Google gave on 26 Nov 05:12, on every try of the question
+BUSY_ERROR = RuntimeError("504 DEADLINE_EXCEEDED. {'error': {'code': 504, 'message': "
+                          "'Deadline expired before operation could complete.'}}")
+
+
+def test_google_busy_gets_one_notice_and_retries(meta, monkeypatch):
+    # 26 Nov 05:12: Google failed every try; the same question asked 3 minutes later worked.
+    # Here it fails twice, then the second retry works.
+    planned, calls = meta
+    monkeypatch.setattr(app, "RETRY_AFTER", 0)  # no real 2-minute wait in the test
+    results = [BUSY_ERROR, BUSY_ERROR, ("the answer", [])]
+
+    def think(phone, question):
+        result = results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    alerts, saved = run_answer(monkeypatch, think)
+    assert sent_texts(calls) == [app.BUSY, "the answer"]  # the notice only once
+    assert alerts == []      # it worked in the end: nothing to alert about
+    assert len(saved) == 1
+
+
+def test_google_still_busy_after_the_retries_gets_the_apology(meta, monkeypatch):
+    planned, calls = meta
+    monkeypatch.setattr(app, "RETRY_AFTER", 0)
+    tries = []
+
+    def think(phone, question):
+        tries.append(question)
+        raise BUSY_ERROR
+
+    alerts, saved = run_answer(monkeypatch, think)
+    assert len(tries) == 3   # the first try and 2 retries, no more
+    assert sent_texts(calls) == [app.BUSY, app.SORRY]
+    assert len(alerts) == 1  # now the developer hears about it
+    assert saved == []

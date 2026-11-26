@@ -35,6 +35,19 @@ TRIES = 3  # Meta's servers sometimes fail for a moment, so every call to Meta g
 seen_ids = set()  # Meta sometimes delivers the same message twice
 SORRY = "ბოდიში, რაღაც შეფერხდა და პასუხი ვერ მოგწერეთ. სცადეთ ხელახლა."
 VOICE_SORRY = "ბოდიში, ხმოვანი შეტყობინება ვერ გავიგე. სცადეთ ხელახლა ან დაწერეთ."
+BUSY = ("⏳ Google-ის სერვერები ახლა გადატვირთულია, ამიტომ პასუხს ცოტა მეტი დრო სჭირდება. "
+        "რამდენიმე წუთში მოგწერთ, ხელახლა გაგზავნა საჭირო არ არის.")
+
+# Google sometimes gets overloaded for a few minutes: then every try of a question fails
+# (26 Nov: 4 tries, 170 s, all "504 DEADLINE_EXCEEDED"; the same question 3 min later took 23 s).
+# For these errors the bot says so (once), waits RETRY_AFTER seconds and tries again, up to BUSY_RETRIES times.
+GOOGLE_BUSY = ("DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED", "UNAVAILABLE")  # Google's 504, 429, 503
+RETRY_AFTER = 120
+BUSY_RETRIES = 2
+
+
+def google_busy(error):
+    return any(word in str(error) for word in GOOGLE_BUSY)
 
 # People often send one question as several quick messages ("hi", "how are you?",
 # "report for yesterday"). The bot answers only after the person has been quiet for
@@ -105,6 +118,12 @@ def give_up(phone, what, error, apology=SORRY):
     except Exception as e:  # Meta itself is down: nothing more we can do
         print("Failed to send the apology", phone, ":", e)
 
+def tell_busy(phone):
+    try:
+        send_text(phone, BUSY)
+    except Exception as e:  # the retry still happens; the person just doesn't get the notice
+        print("Failed to send the busy message", phone, ":", e)
+
 def to_text(phone, items):
     # Voice messages become text. Returns all texts, and separately what we heard in voice
     texts, heard = [], []
@@ -161,6 +180,7 @@ async def answer_person(phone):
     # receiving messages meanwhile
     try:
         texts, heard = [], []
+        retries = 0  # whole-question retries after "Google is busy" errors
         while True:
             await wait_until_quiet(phone)
             new_texts, new_heard = await asyncio.to_thread(to_text, phone, waiting.pop(phone, []))
@@ -173,6 +193,15 @@ async def answer_person(phone):
             try:
                 reply, files = await asyncio.to_thread(think, phone, question)
             except Exception as e:
+                if google_busy(e) and retries < BUSY_RETRIES:
+                    # Tell the person (only the first time), wait, and ask again. Messages that
+                    # arrive meanwhile are answered together with this question (the loop picks them up).
+                    retries += 1
+                    print(f"Google is busy, retry {retries} of {BUSY_RETRIES} in {RETRY_AFTER} s:", phone, e)
+                    if retries == 1:
+                        await asyncio.to_thread(tell_busy, phone)
+                    await asyncio.sleep(RETRY_AFTER)
+                    continue
                 await asyncio.to_thread(give_up, phone, "prepare an answer", e)
                 return
             # Last check before sending: did the person write more while the bot was thinking?
