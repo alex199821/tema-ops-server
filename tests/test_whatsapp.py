@@ -80,10 +80,12 @@ def test_file_upload_retried_with_the_same_file(meta, tmp_path):
     assert calls[-1]["json"]["document"]["id"] == "media-1"
 
 
-def run_answer(monkeypatch, think):
-    # Runs the bot's answering for one text question; returns the alerts and saved answers
+def run_answer(monkeypatch, think, ack=None):
+    # Runs the bot's answering for one text question; returns the alerts and saved answers.
+    # ack: the "on it" Flash-Lite would write (None = none, so no test ever calls the real model)
     alerts, saved = [], []
     monkeypatch.setattr(app, "think", think)
+    monkeypatch.setattr(app, "acknowledgement", lambda question: ack)
     monkeypatch.setattr(app, "alert", lambda subject, body: alerts.append(body))
     monkeypatch.setattr(app, "save_answer", lambda *args: saved.append(args))
     app.waiting[PHONE] = [("text", "question")]
@@ -186,3 +188,51 @@ def test_google_still_busy_after_the_retries_gets_the_apology(meta, monkeypatch)
     assert sent_texts(calls) == [app.BUSY, app.SORRY]
     assert len(alerts) == 1  # now the developer hears about it
     assert saved == []
+
+
+def test_quick_on_it_comes_before_the_answer_and_is_not_saved(meta, monkeypatch):
+    planned, calls = meta
+
+    def slow_think(phone, question):
+        time.sleep(0.3)  # the real answer takes a while; the "on it" is quicker
+        return "the answer", []
+
+    alerts, saved = run_answer(monkeypatch, slow_think, ack="ვამოწმებ გუშინდელ გაყიდვებს...")
+    assert sent_texts(calls) == ["🔍 ვამოწმებ გუშინდელ გაყიდვებს...", "the answer"]
+    assert [s[3] for s in saved] == ["the answer"]  # only the real answer goes to the memory
+
+
+def test_on_it_only_once_even_when_google_is_busy(meta, monkeypatch):
+    planned, calls = meta
+    monkeypatch.setattr(app, "RETRY_AFTER", 0)
+    results = [BUSY_ERROR, ("the answer", [])]
+
+    def think(phone, question):
+        time.sleep(0.1)
+        result = results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    alerts, saved = run_answer(monkeypatch, think, ack="ვამოწმებ...")
+    assert sent_texts(calls) == ["🔍 ვამოწმებ...", app.BUSY, "the answer"]
+
+
+def test_acknowledgement_says_nothing_when_it_should_not(monkeypatch):
+    from langchain_core.messages import AIMessage
+
+    class FakeLite:
+        def __init__(self, reply):
+            self.reply = reply
+
+        def invoke(self, messages):
+            if isinstance(self.reply, Exception):
+                raise self.reply
+            return AIMessage(content=self.reply)
+
+    for reply, expected in [("ვამოწმებ ლისის გაყიდვებს...", "ვამოწმებ ლისის გაყიდვებს..."),
+                            ("-", None),                         # "thanks", "ok": not a task
+                            ("x" * 300, None),                   # too long for an "on it"
+                            (TimeoutError("late"), None)]:       # Flash-Lite failed or was late
+        monkeypatch.setattr(app, "ack_model", FakeLite(reply))
+        assert app.acknowledgement("question") == expected

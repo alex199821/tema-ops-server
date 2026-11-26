@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
 from tema_ops.agent.agent import MAX_QUESTIONS, build_agent
+from tema_ops.agent.model import get_model
 from tema_ops.agent.voice import transcribe
 from tema_ops.notify import alert
 from tema_ops.whatsapp.history import last_questions, save_answer
@@ -26,6 +27,14 @@ WHATSAPP_RULES = """Your reply is read in WhatsApp on a phone.
 
 app = FastAPI()
 agent = build_agent(WHATSAPP_RULES, remember=False)  # memory is in the database (history.py)
+
+# A quick "on it" while the real answer is prepared (that takes 15-60 s). Flash-Lite answers in
+# ~1 s; 1 try, at most 5 s, and if it fails or is late the person just gets the real answer.
+ACK_PROMPT = """Someone sent this message to Tema's business-data assistant. Another AI is now preparing
+the full answer. Write ONE short sentence in the message's language saying what is being checked,
+e.g. "ვამოწმებ ლისის გუშინდელ გაყიდვებს...". No numbers, no answer, no promises, no greeting.
+If the message is not a question or a task (e.g. thanks, ok, hi), reply with just: -"""
+ack_model = get_model(timeout=5, name="google_genai:gemini-3.5-flash-lite", tries=1)
 ALLOWED_NUMBERS = set(os.environ["WHATSAPP_ALLOWED_NUMBERS"].split(","))
 APP_SECRET = os.environ["WHATSAPP_APP_SECRET"].encode() 
 SEND_URL = f"https://graph.facebook.com/v25.0/{os.environ['WHATSAPP_PHONE_NUMBER_ID']}/messages"
@@ -118,6 +127,21 @@ def give_up(phone, what, error, apology=SORRY):
     except Exception as e:  # Meta itself is down: nothing more we can do
         print("Failed to send the apology", phone, ":", e)
 
+def acknowledgement(question):
+    # The one-line "on it" for this question, or None (not a task, or Flash-Lite failed / was late)
+    try:
+        text = ack_model.invoke([("system", ACK_PROMPT), ("human", question)]).text.strip()
+    except Exception as e:
+        print("No acknowledgement:", e)
+        return None
+    return None if text in ("", "-") or len(text) > 200 else text
+
+def send_acknowledgement(phone, text):
+    try:
+        send_text(phone, "🔍 " + text)
+    except Exception as e:  # the real answer still comes; only the "on it" is lost
+        print("Failed to send the acknowledgement", phone, ":", e)
+
 def tell_busy(phone):
     try:
         send_text(phone, BUSY)
@@ -181,6 +205,7 @@ async def answer_person(phone):
     try:
         texts, heard = [], []
         retries = 0  # whole-question retries after "Google is busy" errors
+        acknowledged = False  # the "on it" is sent once per question, not on retries
         while True:
             await wait_until_quiet(phone)
             new_texts, new_heard = await asyncio.to_thread(to_text, phone, waiting.pop(phone, []))
@@ -190,8 +215,16 @@ async def answer_person(phone):
                 return
             # All messages so far are one question (a voice message = the text we heard)
             question, asked = "\n".join(texts), asked_at[phone]
+            # The real answer and the quick "on it" are prepared at the same time, so the answer
+            # isn't delayed. The "on it" goes out only if the answer isn't ready yet.
+            thinking = asyncio.create_task(asyncio.to_thread(think, phone, question))
+            if not acknowledged:
+                acknowledged = True
+                ack = await asyncio.to_thread(acknowledgement, question)
+                if ack and not thinking.done():
+                    await asyncio.to_thread(send_acknowledgement, phone, ack)
             try:
-                reply, files = await asyncio.to_thread(think, phone, question)
+                reply, files = await thinking
             except Exception as e:
                 if google_busy(e) and retries < BUSY_RETRIES:
                     # Tell the person (only the first time), wait, and ask again. Messages that
