@@ -2,7 +2,7 @@
 
 Orders that customers placed through Wolt (delivery app).
 Data starts 2026-08-10 for სანაპირო and ლისი, 2026-09-07 for დოლაბაური,
-2026-11-02 for ივერთუბანი (the day it opened).
+2026-11-11 for ივერთუბანი (it opened 2026-11-02, but its first Wolt order came on 2026-11-11).
 
 ## Tables
 
