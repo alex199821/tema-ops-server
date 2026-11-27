@@ -6,7 +6,7 @@ from tema_ops.agent.tools import get_wolt_report, run_sql
 
 
 def test_run_sql_reads():
-    assert "(3 rows)" in run_sql.invoke("SELECT id, name FROM branches")
+    assert "(4 rows)" in run_sql.invoke("SELECT id, name FROM branches")
 
 
 def test_run_sql_cannot_delete():

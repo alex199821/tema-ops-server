@@ -5,7 +5,7 @@ from tema_ops.agent.model import get_model
 TRANSCRIBE_PROMPT = """Write down exactly what is said in this voice message, in the language it was spoken.
 Output only the spoken words, nothing else. Do not answer the question and do not translate it.
 The speaker works at Tema, a fast-food chain in Tbilisi. Words you may hear: the branches
-სანაპირო, ლისი, დოლაბაური; Wolt; products like ქათმის როლი, პიტა ცეზარი, ბურგერი, კარტოფილი ფრი."""
+სანაპირო, ლისი, დოლაბაური, ივერთუბანი; Wolt; products like ქათმის როლი, პიტა ცეზარი, ბურგერი, კარტოფილი ფრი."""
 
 model = get_model()
 

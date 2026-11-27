@@ -14,8 +14,8 @@ Data starts 2026-09-03 (the café opened that afternoon; the first full day is 2
 | 2            | ახალი კაფე | not linked yet (`branch_id` empty)  |
 
 So far ახალი კაფე (ბოჭორმის ქუჩა) is the only café with store data, and it is not linked
-to a branch yet. For store sales of სანაპირო, ლისი or დოლაბაური, say there is no store
-data for them yet.
+to a branch yet. For store sales of სანაპირო, ლისი, დოლაბაური or ივერთუბანი, say there is
+no store data for them yet.
 
 `incopos.sales`: one row per receipt
 

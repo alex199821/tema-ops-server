@@ -17,6 +17,7 @@ Table `branches (id, name)`. Every department links its data to a branch.
 | 1           | სანაპირო  | Sanapiro, Gamsakhurdia |
 | 2           | ლისი      | Lisi, Amashukeli       |
 | 3           | დოლაბაური | Dolabauri              |
+| 4           | ივერთუბანი | Ivertubani, Khudadovi |
 
 ## General rules
 - A day = the calendar date of the event time (e.g. when an order came in).

@@ -1,7 +1,8 @@
 # Wolt glossary (for the AI)
 
 Orders that customers placed through Wolt (delivery app).
-Data starts 2026-08-10 for სანაპირო and ლისი, 2026-09-07 for დოლაბაური.
+Data starts 2026-08-10 for სანაპირო and ლისი, 2026-09-07 for დოლაბაური,
+2026-11-02 for ივერთუბანი (the day it opened).
 
 ## Tables
 
@@ -13,6 +14,7 @@ Data starts 2026-08-10 for სანაპირო and ლისი, 2026-09-07
 | Tema Gamsakhurdia | სანაპირო  |
 | Tema Amashukeli   | ლისი      |
 | Tema Dolabauri    | დოლაბაური |
+| Tema Ivertubani   | ივერთუბანი |
 
 `wolt.orders`: one row per Wolt order
 
