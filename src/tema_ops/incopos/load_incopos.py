@@ -8,6 +8,8 @@ A receipt with no payment is skipped: it has no time. (5 in the history, all 0 G
 deleted_items.json (if there): products the branch has deleted in IncoPOS but sold before. IncoCloud's
 product list leaves them out, so they were looked up one by one (item?id=…); without them their sales
 would have no name. (ლისი: 21 products, saved 2026-11-28.)
+Every product is also linked to the shared product list (`products`, see products.py), so the
+same product can be added up over branches that name it differently.
 
 Usage:
   uv run python src/tema_ops/incopos/load_incopos.py                                 (every saved day)
@@ -26,6 +28,7 @@ from dotenv import load_dotenv
 from psycopg.types.json import Jsonb
 
 from tema_ops.incopos.branches import BRANCHES, DATA_DIR
+from tema_ops.incopos.products import product_name
 
 load_dotenv()
 
@@ -45,6 +48,17 @@ ON CONFLICT (branch_id, id) DO UPDATE SET
 UPSERT_GROUP = """
 INSERT INTO incopos.item_groups (branch_id, id, name, code) VALUES (%s, %s, %s, %s)
 ON CONFLICT (branch_id, id) DO UPDATE SET name = EXCLUDED.name, code = EXCLUDED.code
+"""
+
+# A shared product is added only if its name is new (so the id counter doesn't run on every night)
+ADD_PRODUCT = """
+INSERT INTO products (name) SELECT %(name)s WHERE NOT EXISTS (SELECT 1 FROM products WHERE name = %(name)s)
+ON CONFLICT (name) DO NOTHING
+"""
+
+LINK_PRODUCT = """
+UPDATE incopos.items SET product_id = (SELECT id FROM products WHERE name = %s)
+WHERE branch_id = %s AND id = %s
 """
 
 INSERT_SALE = """
@@ -92,7 +106,17 @@ def load_reference(cur, branch_id: int, folder: Path) -> int:
     cur.executemany(UPSERT_ITEM, [(branch_id, i["Id"], i["Name"], i["GroupId"], i["MeasureUnit"],
                                    number(i["RetailPrice"]), i["Deleted"], Jsonb(i))
                                   for i in items])
+    link_products(cur, branch_id, folder.name)
     return shop["Id"]
+
+
+def link_products(cur, branch_id: int, branch: str) -> None:
+    """Points every product of the branch (also older ones that are no longer in its files) to its
+    shared product, adding the shared product if it's new."""
+    items = cur.execute("SELECT id, name FROM incopos.items WHERE branch_id = %s", (branch_id,)).fetchall()
+    shared = {item_id: product_name(branch, name) for item_id, name in items}
+    cur.executemany(ADD_PRODUCT, [{"name": n} for n in sorted(set(shared.values()))])
+    cur.executemany(LINK_PRODUCT, [(n, branch_id, item_id) for item_id, n in shared.items()])
 
 
 def load_day(cur, branch_id: int, shop_id: int, path: Path) -> tuple[int, int]:

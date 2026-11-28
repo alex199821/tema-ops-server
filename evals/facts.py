@@ -42,6 +42,7 @@ JOIN branches b ON b.id = v.branch_id"""
 STORE = """incopos.sales s
 JOIN incopos.sale_lines l ON l.branch_id = s.branch_id AND l.sale_id = s.id
 JOIN incopos.items i ON i.branch_id = l.branch_id AND i.id = l.item_id
+JOIN products p ON p.id = i.product_id
 JOIN incopos.item_groups g ON g.branch_id = i.branch_id AND g.id = i.group_id"""
 
 # Sandwiches = all handheld food (agent/glossary.md). Wolt: the names in wolt/glossary.md.
@@ -49,10 +50,10 @@ WOLT_SANDWICHES = """('ქათმის როლი', 'სოკოს რო
   'ქათმის სენდვიჩი', 'ქათმის სენდვიჩი ორმაგი შიგთავსით', 'ლორის და ყველის სენდვიჩი',
   'ლორის და ყველის სენდვიჩი ორმაგი შიგთავსით', 'წითელი ქაშაყის სენდვიჩი', 'ბურგერი')"""
 # Store: every product of the food group except the salads and fries (incopos/glossary.md)
-STORE_SANDWICH = ("g.name IN ('მზა პროდუქცია', 'სენდვიჩები') AND i.name NOT IN "
-                  "('ცეზარი', 'ბერძნული', 'ტუნა', 'ფრი', 'კარტოფილი ფრი') AND i.name NOT LIKE '%სალათი%'")
+STORE_SANDWICH = ("g.name IN ('მზა პროდუქცია', 'სენდვიჩები') AND p.name NOT IN "
+                  "('ცეზარი', 'ბერძნული', 'ტუნა', 'ფრი', 'აჯიკის დანამატი', 'სიროფი 0,030', 'აჯიკა კონტეინერით')")
 # In the store group ყავა but not coffee
-NOT_COFFEE = "('ჩაი', 'ცხელი შოკოლადი', 'ორმაგი ცხელი შოკოლადი', 'ცივი მაჩა', 'პოდი')"
+NOT_COFFEE = "('ჩაი', 'ცხელი შოკოლადი', 'ორმაგი ცხელი შოკოლადი', 'ცივი მაჩა', 'მაჩა ლატე', 'პოდი')"
 
 
 def day_sales(day):
@@ -102,8 +103,8 @@ SELECT *, wolt_orders + store_receipts AS orders_plus_receipts FROM (
 
     {"n": 5, "question": "21.11.2026 ში რამდენი დოზა ყავა გაიყიდა",
      "sql": f"""
-SELECT SUM(l.quantity) FILTER (WHERE i.name NOT IN {NOT_COFFEE}) AS coffee_cups,
-       SUM(l.quantity) FILTER (WHERE i.name IN {NOT_COFFEE}) AS other_drinks,
+SELECT SUM(l.quantity) FILTER (WHERE p.name NOT IN {NOT_COFFEE}) AS coffee_cups,
+       SUM(l.quantity) FILTER (WHERE p.name IN {NOT_COFFEE}) AS other_drinks,
        SUM(l.quantity) AS whole_group
 FROM {STORE} WHERE g.name = 'ყავა' AND s.paid_at::date = '2026-11-21'""",
      "required": [["coffee_cups"]],
@@ -129,7 +130,7 @@ WITH w AS (SELECT b.name, i.count, i.final_gross FROM {WOLT} JOIN wolt.order_ite
            WHERE o.status = 'DELIVERED' AND o.received_at::date BETWEEN '2026-11-11' AND '2026-11-24'
              AND i.name = 'ქათმის როლი'),
      st AS (SELECT SUM(l.quantity) AS units, SUM(l.quantity * l.price) AS gel FROM {STORE}
-            WHERE i.name = 'როლი' AND s.paid_at::date BETWEEN '2026-11-11' AND '2026-11-24')
+            WHERE p.name = 'როლი' AND s.paid_at::date BETWEEN '2026-11-11' AND '2026-11-24')
 SELECT SUM(count) AS wolt_units, SUM(final_gross) AS wolt_gel,
        SUM(count) FILTER (WHERE name = 'ლისი') AS lisi_units,
        SUM(count) FILTER (WHERE name = 'დოლაბაური') AS dolabauri_units,

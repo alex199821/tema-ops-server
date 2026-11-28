@@ -38,8 +38,11 @@ products on its own, so the same receipt number or product id exists in other br
 | quantity    | how many units |
 | price       | price per unit, GEL, incl. 18% VAT |
 
-`incopos.items (branch_id, id, name, group_id)`: each branch's products.
-`(branch_id, group_id)` → `incopos.item_groups (branch_id, id)`.
+`incopos.items (branch_id, id, name, group_id, product_id)`: each branch's products.
+`(branch_id, group_id)` → `incopos.item_groups (branch_id, id)`. `product_id` → `products.id`.
+`products (id, name)`: ONE product list for all branches. Branches name some products differently
+(სანაპირო ქათმის როლი = the others' როლი, კოლა 500 = კოკა კოლა 0,500); `products.name` is the same
+everywhere, so use it for any question about a product: `JOIN products p ON p.id = i.product_id`.
 `incopos.item_groups (branch_id, id, name)`: each branch's product groups (lists below).
 `incopos.locations (branch_id, id, name)`: each branch's POS name (rarely needed).
 
@@ -54,12 +57,12 @@ products on its own, so the same receipt number or product id exists in other br
 - "დოზა ყავა" (coffee doses) = cups of coffee sold = units of the group ყავა (a double is one cup).
   That group also has ჩაი, ცხელი შოკოლადი, ორმაგი ცხელი შოკოლადი, ცივი მაჩა, პოდი (and at ლისი
   მაჩა ლატე): say how many of those are included.
-- Sandwiches (every branch) = the food group minus the salads and fries:
-  `g.name IN ('მზა პროდუქცია', 'სენდვიჩები') AND i.name NOT IN ('ცეზარი', 'ბერძნული', 'ტუნა', 'ფრი', 'კარტოფილი ფრი') AND i.name NOT LIKE '%სალათი%'`
+- Sandwiches (every branch) = the food group minus the salads, fries and add-ons:
+  `g.name IN ('მზა პროდუქცია', 'სენდვიჩები') AND p.name NOT IN ('ცეზარი', 'ბერძნული', 'ტუნა', 'ფრი', 'აჯიკის დანამატი', 'სიროფი 0,030', 'აჯიკა კონტეინერით')`
 - A day = `paid_at::date` (calendar day, 00:00–24:00).
-- Filter products by `items.name`, not by id (ids differ per branch, and one name can have two ids).
-- Product and group names differ between branches (see the end). To compare a product across
-  branches, add up its names in each branch and say which names you used.
+- Filter products by `products.name` (the shared name), never by an id (ids differ per branch).
+  The names in this glossary are the shared names.
+- Product groups differ between branches (see the end): for a kind of product, use the rules above.
 - Store product names are not the same as Wolt's: match each source by its own names.
 - IncoPOS has no card/cash split, no cashier, no customer and no discounts, and its costs are wrong.
   Profit can't be calculated from it. Say so instead of looking.
@@ -99,6 +102,7 @@ The other groups (mostly supplier names) have no sales.
 ### ლისი: the same names, except
 - cold drinks are in the group გამაგრილებელი სასმელები (not ცივი სასმელები)
 - sauces and add-ons are in ნედლეული: #პიკანტური 0,50, #კეტჩუპი 0,50, #მაიონეზი 0,50, გ ლ ა ს ა
+- but აჯიკის დანამატი, სიროფი 0,030 and აჯიკა კონტეინერით are in მზა პროდუქცია (the food group)
 - spirits by the glass: ბეილისი 0,050, ჯეიმსონი 0,05, აბსოლუტი 0,05, ფილანდია 0,05, ჯეკ დენიელსი 0,05
 - also: ტუნას სალათი (a salad), მაჩა ლატე (in ყავა), სნო არომატით
 
@@ -109,11 +113,8 @@ The other groups (mostly supplier names) have no sales.
 - ინგრედიენტები (sauces: აჯიკა, პიკანტური, კეჩუპი, მაიონეზი), სახარჯი მასალები (packaging)
 - პ ო დ ი ს (ყავები): pods and coffee by the kilo to take home (უკოფეინო პოდი, ყავა ფლორიო 1კგ,
   რუჟი რიშარი 1კგ…), not cups
-- its names for products the others name differently (probably the same product, not checked yet):
-  ქათმის როლი = როლი, კარტოფილი ფრი = ფრი, სენდვიჩი ლორით = ლორის სენდვიჩი,
-  წითელი ქაშაყის სენდვიჩი = ქაშაყის სენდვიჩი, ქათმის სენდვიჩი ლავაშში, ორმაგი ქათმის სენდვიჩი ლავაშში,
-  კოლა 500 = კოკა კოლა 0,500, კოლა ზერო = კოკა კოლა ზერო, სნო = სნო 0,5, ფანტა, სპრაიტი, ბერნი,
-  ორმაგო ესპრესო = ორმაგი ესპრესო, ჯეიმსონი 0,5, აბსოლიტი, ბეილისი, ფილანდია
+- many of its products have their own names (ქათმის როლი, კოლა 500, კარტოფილი ფრი…): `products.name`
+  gives the shared name
 
 ## Examples
 
@@ -132,6 +133,18 @@ FROM incopos.sales s
 JOIN incopos.sale_lines l ON l.branch_id = s.branch_id AND l.sale_id = s.id
 JOIN branches b ON b.id = s.branch_id
 WHERE s.paid_at::date = CURRENT_DATE - 1
+GROUP BY b.name;
+```
+
+Rolls sold per branch in the last 7 days (one product in every branch, whatever its name there)
+```sql
+SELECT b.name AS branch, SUM(l.quantity) AS rolls
+FROM incopos.sale_lines l
+JOIN incopos.sales s ON s.branch_id = l.branch_id AND s.id = l.sale_id
+JOIN incopos.items i ON i.branch_id = l.branch_id AND i.id = l.item_id
+JOIN products p ON p.id = i.product_id
+JOIN branches b ON b.id = s.branch_id
+WHERE p.name = 'როლი' AND s.paid_at::date BETWEEN CURRENT_DATE - 7 AND CURRENT_DATE - 1
 GROUP BY b.name;
 ```
 
