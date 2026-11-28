@@ -1,9 +1,8 @@
-"""Downloads the whole IncoPOS sales history of the branches that have their own key.
+"""Downloads the whole IncoPOS sales history of a branch, fast: for a new key, when months or
+years are missing. (The nightly fetch_incopos.py is for one day at a time.)
 
-Raw files only, one per branch per day: data/incopos_backfill/<branch>/<day>.json.
-They are kept apart from data/incopos/ on purpose: the nightly job loads everything in there
-as location 2, and every branch's account has its own receipt numbers starting at 1.
-The files go into the database once the tables know about branches.
+The files go where fetch_incopos.py puts them: data/incopos/<branch>/<day>.json. Then load them:
+  uv run python src/tema_ops/incopos/load_incopos.py --branch <branch>
 
 Runs on the server in the background (you can log out; it keeps going):
   nohup ~/.local/bin/uv run python src/tema_ops/incopos/backfill.py --gap 20 >> logs/incopos_backfill.log 2>&1 &
@@ -24,12 +23,14 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
+from tema_ops.incopos.branches import DATA_DIR
+
 load_dotenv()
 
 LOGIN_URL = "https://h2.incocloud.com/connect/api/access_token"
-OUT_DIR = Path("data/incopos_backfill")
+OUT_DIR = DATA_DIR
 
-# Branch (= the end of its INCOPOS_APP_ID_<BRANCH> name in .env) → day of its receipt 1
+# Branch (its key in branches.py) → day of its receipt 1
 BRANCHES = {
     "lisi": datetime.date(2024, 8, 25),
     "sanapiro": datetime.date(2025, 3, 13),

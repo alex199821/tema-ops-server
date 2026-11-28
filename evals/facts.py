@@ -40,16 +40,17 @@ JOIN wolt.venues v ON v.id = o.venue_id
 JOIN branches b ON b.id = v.branch_id"""
 # Store receipt lines with their product and group
 STORE = """incopos.sales s
-JOIN incopos.sale_lines l ON l.location_id = s.location_id AND l.sale_id = s.id
-JOIN incopos.items i ON i.id = l.item_id
-JOIN incopos.item_groups g ON g.id = i.group_id"""
+JOIN incopos.sale_lines l ON l.branch_id = s.branch_id AND l.sale_id = s.id
+JOIN incopos.items i ON i.branch_id = l.branch_id AND i.id = l.item_id
+JOIN incopos.item_groups g ON g.branch_id = i.branch_id AND g.id = i.group_id"""
 
 # Sandwiches = all handheld food (agent/glossary.md). Wolt: the names in wolt/glossary.md.
 WOLT_SANDWICHES = """('ქათმის როლი', 'სოკოს როლი სამარხვო', 'პიტა ცეზარი', 'ლეგო პიტა ცეზარი',
   'ქათმის სენდვიჩი', 'ქათმის სენდვიჩი ორმაგი შიგთავსით', 'ლორის და ყველის სენდვიჩი',
   'ლორის და ყველის სენდვიჩი ორმაგი შიგთავსით', 'წითელი ქაშაყის სენდვიჩი', 'ბურგერი')"""
 # Store: every product of the food group except the salads and fries (incopos/glossary.md)
-STORE_SANDWICH = "g.name = 'მზა პროდუქცია' AND i.name NOT IN ('ცეზარი', 'ბერძნული', 'ტუნა', 'ფრი')"
+STORE_SANDWICH = ("g.name IN ('მზა პროდუქცია', 'სენდვიჩები') AND i.name NOT IN "
+                  "('ცეზარი', 'ბერძნული', 'ტუნა', 'ფრი', 'კარტოფილი ფრი') AND i.name NOT LIKE '%სალათი%'")
 # In the store group ყავა but not coffee
 NOT_COFFEE = "('ჩაი', 'ცხელი შოკოლადი', 'ორმაგი ცხელი შოკოლადი', 'ცივი მაჩა', 'პოდი')"
 
@@ -59,7 +60,7 @@ def day_sales(day):
     return f"""
 WITH w AS (SELECT b.name, o.total_gross FROM {WOLT}
            WHERE o.status = 'DELIVERED' AND o.received_at::date = '{day}'),
-     st AS (SELECT SUM(l.quantity * l.price) AS gel, COUNT(DISTINCT s.id) AS receipts FROM {STORE}
+     st AS (SELECT SUM(l.quantity * l.price) AS gel, COUNT(DISTINCT (s.branch_id, s.id)) AS receipts FROM {STORE}
             WHERE s.paid_at::date = '{day}')
 SELECT SUM(total_gross) AS wolt_gel, COUNT(*) AS wolt_orders,
        SUM(total_gross) FILTER (WHERE name = 'ლისი') AS lisi_gel,

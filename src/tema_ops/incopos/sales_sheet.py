@@ -18,7 +18,8 @@ So whatever people change in past months stays, and so do notes and colours anyw
 
 Nino's formulas: შემოსავალი = გაყიდული × ფასი, მოგება = გაყიდული × (ფასი − თვითღირებულება).
 A day = 21:00 the evening before -> 21:00, like the cash book (night + day shift).
-Needs SALES_SHEET_ID, and SALES_SHEET_TAB_<IncoPOS location id> for each branch to write.
+Needs SALES_SHEET_ID, and SALES_SHEET_TAB_<BRANCH> (the branch's key in branches.py, e.g.
+SALES_SHEET_TAB_LISI) = the tab's name, for each branch to write. A branch without one is skipped.
 
 Usage:
   uv run python src/tema_ops/incopos/sales_sheet.py                    (the newest month)
@@ -34,6 +35,8 @@ import gspread
 import psycopg
 from dotenv import find_dotenv, load_dotenv
 from gspread.utils import rowcol_to_a1
+
+from tema_ops.incopos.branches import BRANCHES
 
 COSTS_TAB = "თვითღირებულებები"           # A = product, B = cost; people keep it, the robot only reads it
 MONTHS = ["იანვარი", "თებერვალი", "მარტი", "აპრილი", "მაისი", "ივნისი", "ივლისი",
@@ -61,12 +64,12 @@ FILL = {"money": YELLOW, "profit": GREEN, "total_money": DARK_GREEN, "total_prof
 DAY = "(s.paid_at + interval '3 hours')::date"
 
 # The day of the newest receipt: still going on (or not fully loaded), so only days before it count
-NEWEST_SQL = "SELECT (max(paid_at) + interval '3 hours')::date FROM incopos.sales WHERE location_id = %(loc)s"
+NEWEST_SQL = "SELECT (max(paid_at) + interval '3 hours')::date FROM incopos.sales WHERE branch_id = %(branch)s"
 
 MONTHS_SQL = f"""
 SELECT DISTINCT date_trunc('month', {DAY})::date
 FROM incopos.sales s
-WHERE s.location_id = %(loc)s AND {DAY} < %(until)s
+WHERE s.branch_id = %(branch)s AND {DAY} < %(until)s
 ORDER BY 1
 """
 
@@ -75,23 +78,26 @@ ORDER_SQL = f"""
 SELECT coalesce(g.name, %(no_group)s) AS group_name, i.name,
        sum(l.quantity * l.price) AS paid, sum(l.quantity) AS sold
 FROM incopos.sale_lines l
-JOIN incopos.sales s ON s.location_id = l.location_id AND s.id = l.sale_id
-JOIN incopos.items i ON i.id = l.item_id
-LEFT JOIN incopos.item_groups g ON g.id = i.group_id
-WHERE l.location_id = %(loc)s AND {DAY} < %(until)s
+JOIN incopos.sales s ON s.branch_id = l.branch_id AND s.id = l.sale_id
+JOIN incopos.items i ON i.branch_id = l.branch_id AND i.id = l.item_id
+LEFT JOIN incopos.item_groups g ON g.branch_id = i.branch_id AND g.id = i.group_id
+WHERE l.branch_id = %(branch)s AND {DAY} < %(until)s
 GROUP BY 1, 2
 """
 
 # One month's prices: each product's first receipt of the month, IncoPOS's price without VAT
 # (Price − Vat, both per item, as on the receipt line). DISTINCT ON keeps only that first line.
+# სანაპირო's IncoPOS has VAT 0 on every receipt by mistake: its prices include 18% like everywhere,
+# so a line with VatPercent 0 gets Price ÷ 1.18.
 PRICES_SQL = f"""
 SELECT DISTINCT ON (i.name)
        i.name,
-       (d->>'Price')::numeric - (d->>'Vat')::numeric AS price
+       CASE WHEN (d->>'VatPercent')::numeric = 0 THEN (d->>'Price')::numeric / 1.18  -- not rounded, like Price − Vat
+            ELSE (d->>'Price')::numeric - (d->>'Vat')::numeric END AS price
 FROM incopos.sales s
 CROSS JOIN LATERAL jsonb_array_elements(s.raw->'Details') AS d
-JOIN incopos.items i ON i.id = (d->>'ItemId')::int
-WHERE s.location_id = %(loc)s AND {DAY} >= %(start)s AND {DAY} < %(end)s AND {DAY} < %(until)s
+JOIN incopos.items i ON i.branch_id = s.branch_id AND i.id = (d->>'ItemId')::int
+WHERE s.branch_id = %(branch)s AND {DAY} >= %(start)s AND {DAY} < %(end)s AND {DAY} < %(until)s
 ORDER BY i.name, s.paid_at
 """
 
@@ -99,9 +105,9 @@ ORDER BY i.name, s.paid_at
 SALES_SQL = f"""
 SELECT i.name, {DAY} AS day, sum(l.quantity) AS sold
 FROM incopos.sale_lines l
-JOIN incopos.sales s ON s.location_id = l.location_id AND s.id = l.sale_id
-JOIN incopos.items i ON i.id = l.item_id
-WHERE l.location_id = %(loc)s AND {DAY} >= %(start)s AND {DAY} < %(end)s AND {DAY} < %(until)s
+JOIN incopos.sales s ON s.branch_id = l.branch_id AND s.id = l.sale_id
+JOIN incopos.items i ON i.branch_id = l.branch_id AND i.id = l.item_id
+WHERE l.branch_id = %(branch)s AND {DAY} >= %(start)s AND {DAY} < %(end)s AND {DAY} < %(until)s
 GROUP BY 1, 2
 """
 
@@ -111,7 +117,8 @@ NOTES = {
                "თვითღირებულება). გასული თვეები არ იცვლება: იქ შეგიძლიათ ხელით შეცვალოთ.",
     "cost": "ბოლო თვეში: ჩანართიდან „თვითღირებულებები“ (ყოველ ღამე).\n"
             "გასულ თვეებში რჩება ის, რაც იყო. საჭიროების შემთხვევაში აქ შეცვალეთ.",
-    "price": "IncoPOS-ის ფასი დღგ-ის გარეშე (ჩეკის ფასი − დღგ, ორივე IncoPOS-დან), ამ თვის პირველი ჩეკიდან.",
+    "price": "IncoPOS-ის ფასი დღგ-ის გარეშე (ჩეკის ფასი − დღგ, ორივე IncoPOS-დან), ამ თვის პირველი ჩეკიდან.\n"
+             "სადაც ჩეკზე დღგ 0-ია (სანაპირო, შეცდომით): ფასი ÷ 1.18.",
     "unit_profit": "ერთ ცალზე: გაყიდვის ფასი − თვითღირებულება.",
     "money": "გაყიდული × გაყიდვის ფასი",
     "profit": "გაყიდული × მოგება ერთ ცალზე. ცარიელია, თუ თვითღირებულება არ აქვს.",
@@ -339,12 +346,12 @@ def month_formats(tab: Tab, col: Columns, sheet_id: int) -> list:
     return out
 
 
-def update_branch(sheet, conn, location_id: int, view, costs: dict, day: datetime.date | None) -> str:
+def update_branch(sheet, conn, branch_id: int, view, costs: dict, day: datetime.date | None) -> str:
     """Brings one branch tab up to date. Returns a line for the log."""
-    newest = conn.execute(NEWEST_SQL, {"loc": location_id}).fetchone()[0]
+    newest = conn.execute(NEWEST_SQL, {"branch": branch_id}).fetchone()[0]
     if newest is None:
         return f"{view.title}: no sales yet, skipped"
-    until = {"loc": location_id, "until": newest, "no_group": NO_GROUP}
+    until = {"branch": branch_id, "until": newest, "no_group": NO_GROUP}
     months = [m for (m,) in conn.execute(MONTHS_SQL, until).fetchall()]
     if not months:
         return f"{view.title}: no finished day yet, skipped"
@@ -521,15 +528,24 @@ def main():
     sheet = gspread.authorize(creds).open_by_key(os.environ["SALES_SHEET_ID"])
     rows = sheet.worksheet(COSTS_TAB).get_all_values(value_render_option="UNFORMATTED_VALUE")
     costs = {str(r[0]).strip(): r[1] for r in rows[1:] if len(r) > 1 and str(r[0]).strip() and r[1] != ""}
+    old = [k for k in os.environ if k.startswith("SALES_SHEET_TAB_") and k[16:].isdigit()]
+    if old:  # the old names used IncoPOS location numbers, which clash between branches
+        print(f"ignored {', '.join(old)}: rename to SALES_SHEET_TAB_<BRANCH>, e.g. SALES_SHEET_TAB_DOLABAURI")
     with psycopg.connect(os.environ["INCOPOS_DATABASE_URL"]) as conn:
-        for location_id, location_name in conn.execute("SELECT id, name FROM incopos.locations ORDER BY id").fetchall():
-            tab_name = os.environ.get(f"SALES_SHEET_TAB_{location_id}")
+        for key, branch_name in BRANCHES.items():
+            tab_name = os.environ.get(f"SALES_SHEET_TAB_{key.upper()}")
             if not tab_name:
                 continue  # this branch has no tab yet
-            print(update_branch(sheet, conn, location_id, sheet.worksheet(tab_name), costs, args.day))
+            row = conn.execute("SELECT l.branch_id, l.name FROM incopos.locations l JOIN branches b ON b.id = l.branch_id "
+                               "WHERE b.name = %s", (branch_name,)).fetchone()
+            if row is None:
+                print(f"{tab_name}: no IncoPOS data for {branch_name} yet, skipped")
+                continue
+            branch_id, shop_name = row
+            print(update_branch(sheet, conn, branch_id, sheet.worksheet(tab_name), costs, args.day))
             try:  # the hidden data tab of an earlier version isn't used any more
-                sheet.del_worksheet(sheet.worksheet(f"{location_name} — მონაცემები"))
-                print(f"deleted the old tab {location_name} — მონაცემები")
+                sheet.del_worksheet(sheet.worksheet(f"{shop_name} — მონაცემები"))
+                print(f"deleted the old tab {shop_name} — მონაცემები")
             except gspread.WorksheetNotFound:
                 pass
 

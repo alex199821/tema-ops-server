@@ -9,7 +9,8 @@ down at one branch: is it only there, or everywhere?"). Goal: the bot tells her 
 and a weekly report finds deeper patterns. Code finds the changes; the AI only writes them up.
 
 - [ ] **IncoPOS for the other 4 branches** (in progress). Keys for სანაპირო, ლისი, ივერთუბანი are
-  in the Mac `.env`; დოლაბაური's is still missing. Each key is a separate IncoCloud account that
+  in the Mac `.env`; the first key (POS name ახალი კაფე) is ახალი დოლაბაური, the same branch as
+  Wolt "Tema Dolabauri". Still missing: the OLD დოლაბაური's key. Each key is a separate IncoCloud account that
   counts shops, receipts and products from 1, so the numbers clash. Decided: a `branch_id`
   column on every IncoPOS row and one data folder per branch (option A). Then a download on
   the server: one worker per branch, 3 days at a time, newest first, wait 15 min after an error

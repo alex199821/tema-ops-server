@@ -44,6 +44,6 @@ Remove an item when it's fixed. Question numbers are the `n` in the `tema-ops-ev
 - [ ] **"What was the bad rating about?" skips ratings without a comment** (same chat): it named #495 (with a
   comment) but not the three 1★ ratings with no comment (#321, #512, #374). Fix idea: say how many low
   ratings had no comment at all.
-- [ ] **"No store data for დოლაბაური"** (#2, #4, #12) is true only while ახალი კაფე isn't linked to a
-  branch. If ახალი კაფე turns out to be Wolt's დოლაბაური, set `incopos.locations.branch_id`
-  and update the location table in `incopos/glossary.md`.
+- [x] **"No store data for დოლაბაური"** (#2, #4, #12): ახალი კაფე IS დოლაბაური (the new one). Migration 010
+  gives every IncoPOS row a `branch_id`, and `incopos/glossary.md` lists all 4 branches. Once the other
+  branches are loaded, the store facts (#2, #4, #8, #12) cover all 4 branches, so they change.
