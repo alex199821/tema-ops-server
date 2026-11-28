@@ -5,6 +5,9 @@ branch's id: the receipt and product numbers of different branches clash.
 Safe to run again and again: a receipt already in the database is replaced by the copy from the
 file, and receipts the API repeats end up stored once.
 A receipt with no payment is skipped: it has no time. (5 in the history, all 0 GEL.)
+deleted_items.json (if there): products the branch has deleted in IncoPOS but sold before. IncoCloud's
+product list leaves them out, so they were looked up one by one (item?id=…); without them their sales
+would have no name. (ლისი: 21 products, saved 2026-11-28.)
 
 Usage:
   uv run python src/tema_ops/incopos/load_incopos.py                                 (every saved day)
@@ -83,9 +86,12 @@ def load_reference(cur, branch_id: int, folder: Path) -> int:
     cur.execute(UPSERT_LOCATION, (branch_id, shop["Id"], shop["Name"]))
     cur.executemany(UPSERT_GROUP, [(branch_id, g["Id"], g["Name"], g["Code"])
                                    for g in read_json(folder / "item_groups.json")])
+    deleted = folder / "deleted_items.json"
+    # The deleted ones first: if one is ever back in the product list, the current list wins
+    items = (read_json(deleted) if deleted.exists() else []) + read_json(folder / "items.json")
     cur.executemany(UPSERT_ITEM, [(branch_id, i["Id"], i["Name"], i["GroupId"], i["MeasureUnit"],
                                    number(i["RetailPrice"]), i["Deleted"], Jsonb(i))
-                                  for i in read_json(folder / "items.json")])
+                                  for i in items])
     return shop["Id"]
 
 
