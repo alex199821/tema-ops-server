@@ -4,7 +4,7 @@ from decimal import Decimal
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
-from tema_ops.wolt.wolt_sheet import tab_requests
+from tema_ops.wolt.wolt_sheet import is_empty, tab_requests
 
 
 def excel_tab():
@@ -52,3 +52,11 @@ def test_copies_merges_and_sizes():
     grid = next(r for r in requests if "updateSheetProperties" in r)["updateSheetProperties"]
     assert grid["properties"]["gridProperties"]["rowCount"] == 3
     assert grid["properties"]["gridProperties"]["columnCount"] == 4
+
+
+def test_is_empty():
+    assert is_empty([[]])          # what gspread gives for an empty tab
+    assert is_empty([])
+    assert is_empty([["", ""], [""]])
+    assert not is_empty([["", "x"]])
+    assert not is_empty([[0]])     # a 0 is something someone typed

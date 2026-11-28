@@ -120,9 +120,14 @@ def rebuild(sheet, wb) -> None:
         sheet.batch_update({"requests": requests})
         print(f"{ws.title}: {ws.max_row} rows × {ws.max_column} columns")
     for title in DEFAULT_TABS & tabs.keys():
-        if not tabs[title].get_all_values():  # only if nobody wrote anything in it
+        if is_empty(tabs[title].get_all_values()):  # only if nobody wrote anything in it
             sheet.del_worksheet(tabs[title])
             print(f"deleted the empty tab {title}")
+
+
+def is_empty(values: list) -> bool:
+    """True if no cell has anything in it. (gspread gives [[]] for an empty tab, not [].)"""
+    return not any(cell != "" for row in values for cell in row)
 
 
 def main():
