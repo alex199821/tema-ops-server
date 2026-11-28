@@ -2,8 +2,9 @@
 
 Every branch has its own key (see branches.py). For each branch it also saves its products
 (items.json), product groups (item_groups.json) and shop (locations.json).
-One branch failing doesn't stop the others; the script still ends with an error, so the
-nightly job's alert email goes out.
+When IncoCloud has a hiccup (a server error or no answer), it waits 5 minutes and tries again,
+up to 3 times. A branch that still fails doesn't stop the others; the script then ends with an
+error, so the nightly job's alert email goes out.
 
 Usage:
   uv run python src/tema_ops/incopos/fetch_incopos.py --from 2026-11-26                  (every branch)
@@ -29,6 +30,8 @@ load_dotenv()
 LOGIN_URL = "https://h2.incocloud.com/connect/api/access_token"
 GAP_SECONDS = 20     # between two requests: IncoCloud blocks the IP after ~25 requests in ~3 minutes
 MAX_WAIT = 15 * 60   # never wait more than 15 minutes for a block to end
+SERVER_ERROR_WAIT = 5 * 60  # after a server error or a timeout, wait this long...
+SERVER_ERROR_TRIES = 3      # ...and try again this many times, then the branch fails
 last_request = 0.0
 
 
@@ -44,23 +47,40 @@ def check(response: httpx.Response, name: str):
 
 
 def send(client: httpx.Client, url: str, params: dict, name: str):
-    """GET, at least GAP_SECONDS after the last one. On 429 (blocked) waits as long as IncoCloud asks."""
+    """GET, at least GAP_SECONDS after the last one.
+    - 429 (blocked): waits as long as IncoCloud asks, at most 2 times.
+    - a server error (5xx) or no answer (timeout, dropped connection): IncoCloud's own hiccup
+      (e.g. the 502s of 2026-11-28), so it waits 5 minutes and tries again, at most 3 times."""
     global last_request
-    for attempt in range(3):
+    blocked = server_errors = 0
+    while True:
         time.sleep(max(0.0, last_request + GAP_SECONDS - time.time()))
         last_request = time.time()
-        response = client.get(url, params=params)
-        if response.status_code != 429:
-            return check(response, name)
         try:
-            wait = int(response.headers.get("retry-after", "60"))
-        except ValueError:
-            wait = 60
-        if wait > MAX_WAIT:
-            break
-        print(f"IncoCloud: too many requests, waiting {wait} s before trying {name} again", file=sys.stderr)
-        time.sleep(wait + 5)
-    raise FetchError(f"Error 429 on {name}: still blocked, try again later")
+            response = client.get(url, params=params)
+        except httpx.TransportError as e:  # only the error's type: its text can hold the URL
+            problem = type(e).__name__
+        else:
+            if response.status_code == 429:
+                blocked += 1
+                try:
+                    wait = int(response.headers.get("retry-after", "60"))
+                except ValueError:
+                    wait = 60
+                if blocked >= 3 or wait > MAX_WAIT:
+                    raise FetchError(f"Error 429 on {name}: still blocked, try again later")
+                print(f"IncoCloud: too many requests, waiting {wait} s before trying {name} again", file=sys.stderr)
+                time.sleep(wait + 5)
+                continue
+            if response.status_code < 500:
+                return check(response, name)
+            problem = f"error {response.status_code}"
+        server_errors += 1
+        if server_errors > SERVER_ERROR_TRIES:
+            raise FetchError(f"{problem} on {name}, still failing after {SERVER_ERROR_TRIES} tries 5 min apart")
+        print(f"IncoCloud: {problem} on {name}, trying again in {SERVER_ERROR_WAIT // 60} min "
+              f"({server_errors}/{SERVER_ERROR_TRIES})", file=sys.stderr)
+        time.sleep(SERVER_ERROR_WAIT)
 
 
 class IncoCloud:
