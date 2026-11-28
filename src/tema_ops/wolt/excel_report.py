@@ -164,7 +164,8 @@ def write_shift_month(sheet, year, month, branches, shifts, data_range):
     sheet.append([])
     sheet.append([])
 
-def build_report(path):
+def build_workbook():
+    """The whole report as a workbook in memory (wolt_sheet.py copies it into Google Sheets)."""
     wb = Workbook()
     wb.remove(wb.active)
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn, conn.cursor() as cur:
@@ -202,7 +203,11 @@ def build_report(path):
         while (year, month) <= (last_day.year, last_day.month):
             write_shift_month(sheet, year, month, branches, shifts, data_range)
             year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return wb
 
+
+def build_report(path):
+    wb = build_workbook()
     Path(path).parent.mkdir(exist_ok=True)
     wb.save(path)
 

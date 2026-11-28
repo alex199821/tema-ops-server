@@ -27,6 +27,9 @@ def daily_update(day):
             load_file(cur, Path(f"data/wolt/{venue_id}/{day}.json"))
             print("loaded", venue_id, day)
 
+    # 3. Rebuild the Wolt Google Sheet (a copy of the Excel report), now with this day in it
+    subprocess.run([sys.executable, "src/tema_ops/wolt/wolt_sheet.py"], check=True)
+
 
 if __name__ == "__main__":
     # Default: yesterday. Or pass a date to redo one day: daily_update.py 2026-11-05

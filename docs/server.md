@@ -46,12 +46,24 @@ Run on the Mac (not on the server). It builds the report on the server and copie
 gcloud compute ssh tema-ops-server --zone=europe-west3-a --project=tema-ops-prod --command="cd ~/tema-ops-server && ~/.local/bin/uv run python src/tema_ops/wolt/excel_report.py" && gcloud compute scp tema-ops-server:~/tema-ops-server/reports/wolt_report.xlsx ~/Desktop/ --zone=europe-west3-a --project=tema-ops-prod
 ```
 
+## The Wolt Google Sheet
+
+"თემა - ვოლტის რეპორტი" (`WOLT_SHEET_ID` in `.env`; the robot `tema-ops-vm` is Editor on it) is a copy
+of the Wolt Excel report: `wolt/wolt_sheet.py` builds the Excel in memory and copies every tab into
+it (values, formulas, colours, merged cells). Nobody types into it, so every run rebuilds it from
+scratch. It runs at the end of the 12:00 Wolt job. By hand, or to only see the sizes:
+
+```bash
+cd ~/tema-ops-server && ~/.local/bin/uv run python src/tema_ops/wolt/wolt_sheet.py
+cd ~/tema-ops-server && ~/.local/bin/uv run python src/tema_ops/wolt/wolt_sheet.py --dry-run   # sends nothing
+```
+
 ## Scheduled jobs (cron)
 
 | When | What | Script | Log |
 |---|---|---|---|
 | Every day 01:00 | Fetch yesterday's IncoPOS store sales for every location → DB, then update the sales tabs in the Google Sheet | `incopos/daily_update.py` | `logs/incopos_daily.log` |
-| Every day 12:00 | Fetch yesterday's Wolt orders for all branches → DB | `wolt/daily_update.py` | `logs/daily_update.log` |
+| Every day 12:00 | Fetch yesterday's Wolt orders for all branches → DB, then rebuild the Wolt Google Sheet | `wolt/daily_update.py` | `logs/daily_update.log` |
 | Every 4 h (+ random 0–60 min) | Renew the Wolt token so the chain stays alive | `wolt/wolt_login.py` | `logs/token.log` |
 | Every day 12:30 | Back up the whole database to Cloud Storage (see "Backups") | `scripts/backup_db.sh` | `logs/backup_db.log` |
 | 1st and 16th, 13:00 | Build the Excel report and email it to `WOLT_REPORT_TO` | `wolt/send_report.py` | `logs/send_report.log` |
