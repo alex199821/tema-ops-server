@@ -370,8 +370,9 @@ then `loaded data/incopos/<branch>/<date>.json: N receipts` and `<branch> done: 
 of the Google Sheet (`<tab>: … updated <month>`), and `DONE`. There are fewer receipts than
 sales: the API repeats some receipts, and each is stored once.
 
-The Google Sheet (`SALES_SHEET_ID` in `.env`, one tab per branch named in `SALES_SHEET_TAB_<BRANCH>`,
-e.g. `SALES_SHEET_TAB_LISI`; the branch keys are in `incopos/branches.py`) is kept up to date by `incopos/sales_sheet.py` as the robot (`tema-ops-vm`, Editor on
+The Google Sheet (`SALES_SHEET_ID` in `.env`, one tab per branch in `SALES_SHEET_TAB_<BRANCH>`,
+e.g. `SALES_SHEET_TAB_LISI`: the tab's id from its link (`gid=…`) or its name; the branch keys are in
+`incopos/branches.py`) is kept up to date by `incopos/sales_sheet.py` as the robot (`tema-ops-vm`, Editor on
 the sheet). It never clears a tab: it inserts a section for a new month and a row for a new product,
 and writes only the newest month's IncoPOS cells (price, sold per day, and the cost from the sheet's
 `თვითღირებულებები` tab), so edits in past months stay. To update the tabs by hand, without fetching:

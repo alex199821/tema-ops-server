@@ -19,7 +19,8 @@ So whatever people change in past months stays, and so do notes and colours anyw
 Nino's formulas: შემოსავალი = გაყიდული × ფასი, მოგება = გაყიდული × (ფასი − თვითღირებულება).
 A day = 21:00 the evening before -> 21:00, like the cash book (night + day shift).
 Needs SALES_SHEET_ID, and SALES_SHEET_TAB_<BRANCH> (the branch's key in branches.py, e.g.
-SALES_SHEET_TAB_LISI) = the tab's name, for each branch to write. A branch without one is skipped.
+SALES_SHEET_TAB_LISI) for each branch to write: the tab's id (the number after gid= in the
+tab's link, so renaming the tab is fine) or its name. A branch without one is skipped.
 
 Usage:
   uv run python src/tema_ops/incopos/sales_sheet.py                    (the newest month)
@@ -533,16 +534,17 @@ def main():
         print(f"ignored {', '.join(old)}: rename to SALES_SHEET_TAB_<BRANCH>, e.g. SALES_SHEET_TAB_DOLABAURI")
     with psycopg.connect(os.environ["INCOPOS_DATABASE_URL"]) as conn:
         for key, branch_name in BRANCHES.items():
-            tab_name = os.environ.get(f"SALES_SHEET_TAB_{key.upper()}")
-            if not tab_name:
+            tab = os.environ.get(f"SALES_SHEET_TAB_{key.upper()}", "").strip()
+            if not tab:
                 continue  # this branch has no tab yet
             row = conn.execute("SELECT l.branch_id, l.name FROM incopos.locations l JOIN branches b ON b.id = l.branch_id "
                                "WHERE b.name = %s", (branch_name,)).fetchone()
             if row is None:
-                print(f"{tab_name}: no IncoPOS data for {branch_name} yet, skipped")
+                print(f"{tab}: no IncoPOS data for {branch_name} yet, skipped")
                 continue
             branch_id, shop_name = row
-            print(update_branch(sheet, conn, branch_id, sheet.worksheet(tab_name), costs, args.day))
+            view = sheet.get_worksheet_by_id(int(tab)) if tab.isdigit() else sheet.worksheet(tab)
+            print(update_branch(sheet, conn, branch_id, view, costs, args.day))
             try:  # the hidden data tab of an earlier version isn't used any more
                 sheet.del_worksheet(sheet.worksheet(f"{shop_name} — მონაცემები"))
                 print(f"deleted the old tab {shop_name} — მონაცემები")
